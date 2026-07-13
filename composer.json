@@ -1,0 +1,82 @@
+{
+	"name": "fostercommerce/product-feeds",
+	"description": "Build auto-updating product feeds for shopping and social platforms from Craft Commerce variants or Craft entries.",
+	"homepage": "https://github.com/fostercommerce/product-feeds",
+	"type": "craft-plugin",
+	"keywords": [
+		"craft",
+		"plugin",
+		"commerce",
+		"feed",
+		"google-merchant-center",
+		"meta",
+		"microsoft-advertising",
+		"pinterest",
+		"tiktok",
+		"shopping"
+	],
+	"license": "proprietary",
+	"support": {
+		"email": "support@fostercommerce.com",
+		"issues": "https://github.com/fostercommerce/product-feeds/issues?state=open",
+		"source": "https://github.com/fostercommerce/product-feeds",
+		"docs": "https://github.com/fostercommerce/product-feeds/tree/main/docs",
+		"rss": "https://github.com/fostercommerce/product-feeds/releases.atom"
+	},
+	"authors": [
+		{
+			"name": "Foster Commerce",
+			"homepage": "https://www.fostercommerce.com"
+		}
+	],
+	"autoload": {
+		"psr-4": {
+			"fostercommerce\\productfeeds\\": "src/"
+		}
+	},
+	"autoload-dev": {
+		"psr-4": {
+			"fostercommerce\\productfeeds\\tests\\": "tests/"
+		}
+	},
+	"require": {
+		"php": "^8.2",
+		"ext-xmlwriter": "*",
+		"ext-zlib": "*",
+		"craftcms/cms": "^5.2.0",
+		"craftcms/commerce": "^5.5.0",
+		"moneyphp/money": "^4.0"
+	},
+	"require-dev": {
+		"craftcms/phpstan": "dev-main",
+		"craftcms/rector": "dev-main",
+		"fostercommerce/ecs": "dev-main",
+		"fostercommerce/rector": "dev-main",
+		"phpstan/phpstan": "^1.11",
+		"phpunit/phpunit": "^10.5"
+	},
+	"extra": {
+		"handle": "product-feeds",
+		"class": "fostercommerce\\productfeeds\\ProductFeeds",
+		"name": "Product Feeds",
+		"developer": "Foster Commerce",
+		"documentationUrl": "https://github.com/fostercommerce/product-feeds/tree/main/docs"
+	},
+	"config": {
+		"allow-plugins": {
+			"yiisoft/yii2-composer": true,
+			"craftcms/plugin-installer": true
+		}
+	},
+	"prefer-stable": true,
+	"minimum-stability": "dev",
+	"scripts": {
+		"phpstan": "phpstan --memory-limit=1G",
+		"ecs:check": "ecs check --ansi --memory-limit=1G",
+		"ecs:fix": "ecs check --ansi --fix --memory-limit=1G",
+		"rector:fix": "rector process --config rector.php",
+		"rector:dry-run": "rector process --dry-run --config rector.php",
+		"test": "phpunit --testsuite=unit",
+		"test:integration": "phpunit --testsuite=integration"
+	}
+}

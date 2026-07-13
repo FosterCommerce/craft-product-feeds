@@ -1,0 +1,47 @@
+{% if rows|length %}
+	{% for row in rows %}
+		<div class="pf-preview-item">
+			<div class="pf-preview-head">
+				<code class="pf-preview-id">{{ row.item[idAttribute] ?? ('#' ~ row.elementId) }}</code>
+				{% if row.missing %}
+					<span class="pf-preview-status pf-preview-excluded">
+						{{ 'preview.wouldSkip'|t('product-feeds', { platform: platformLabel, attribute: row.missing }) }}
+					</span>
+				{% else %}
+					<span class="pf-preview-status pf-preview-ok">
+						{{ 'preview.allRequired'|t('product-feeds') }}
+					</span>
+				{% endif %}
+			</div>
+
+			<table class="data fullwidth pf-preview-table">
+				<tbody>
+					{% for name in attributeNames %}
+						{% set value = row.item[name] ?? null %}
+						<tr>
+							<th scope="row"><code>{{ name }}</code></th>
+							<td>
+								{% if value is empty %}
+									<span class="light">-</span>
+								{% elseif name in imageAttributes %}
+									{% for url in (value is iterable ? value : [value]) %}
+										<a href="{{ url }}" target="_blank" rel="noopener" title="{{ url }}">
+											<img class="pf-preview-thumb" src="{{ url }}" alt="">
+										</a>
+									{% endfor %}
+								{% else %}
+									{{ value is iterable ? value|join(', ') : value }}
+								{% endif %}
+							</td>
+						</tr>
+					{% endfor %}
+				</tbody>
+			</table>
+		</div>
+	{% endfor %}
+{% else %}
+	<p class="notice has-icon">
+		<span class="icon" aria-hidden="true"></span>
+		<span>{{ 'preview.empty'|t('product-feeds') }}</span>
+	</p>
+{% endif %}

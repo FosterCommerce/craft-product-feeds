@@ -1,0 +1,23 @@
+{% if excludedProducts|length %}
+	<hr>
+
+	<h2>{{ 'mapping.excludedHeading'|t('product-feeds') }}</h2>
+	<p class="light">{{ 'mapping.excludedIntro'|t('product-feeds', { count: feed.lastBuildSkippedCount ?? 0 }) }}</p>
+
+	<a class="btn" href="{{ actionUrl('product-feeds/feeds/excluded-csv', { feedId: feed.id }) }}">
+		{{ 'mapping.excludedDownload'|t('product-feeds') }}
+	</a>
+
+	<ul class="pf-excluded-list">
+		{% for excluded in excludedProducts %}
+			<li class="pf-excluded-item">
+				{{ elementChip(excluded.element) }}
+				<span class="pf-excluded-reason">{{ 'mapping.excludedReason'|t('product-feeds', { attribute: excluded.reason }) }}</span>
+			</li>
+		{% endfor %}
+	</ul>
+
+	{% if (feed.lastBuildSkippedCount ?? 0) > excludedProducts|length %}
+		<p class="light">{{ 'mapping.excludedTruncated'|t('product-feeds', { shown: excludedProducts|length, total: feed.lastBuildSkippedCount }) }}</p>
+	{% endif %}
+{% endif %}

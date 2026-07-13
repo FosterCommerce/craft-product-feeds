@@ -1,0 +1,49 @@
+{% import '_includes/forms' as forms %}
+
+{{ forms.fsField({
+	label: 'settings.filesystem'|t('product-feeds'),
+	instructions: 'settings.filesystemInstructions'|t('product-feeds'),
+	id: 'fsHandle',
+	name: 'fsHandle',
+	value: settings.fsHandle,
+	errors: settings.getErrors('fsHandle'),
+	required: true,
+}) }}
+
+{{ forms.textField({
+	label: 'settings.batchSize'|t('product-feeds'),
+	instructions: 'settings.batchSizeInstructions'|t('product-feeds'),
+	id: 'batchSize',
+	name: 'batchSize',
+	type: 'number',
+	value: settings.batchSize,
+	errors: settings.getErrors('batchSize'),
+}) }}
+
+{{ forms.textField({
+	label: 'settings.buildTimeout'|t('product-feeds'),
+	instructions: 'settings.buildTimeoutInstructions'|t('product-feeds'),
+	id: 'buildTimeout',
+	name: 'buildTimeout',
+	type: 'number',
+	value: settings.buildTimeout,
+	errors: settings.getErrors('buildTimeout'),
+}) }}
+
+{{ forms.textField({
+	label: 'settings.buildInterval'|t('product-feeds'),
+	instructions: 'settings.buildIntervalInstructions'|t('product-feeds'),
+	id: 'buildInterval',
+	name: 'buildInterval',
+	type: 'number',
+	value: settings.buildInterval,
+	errors: settings.getErrors('buildInterval'),
+}) }}
+
+{{ forms.lightswitchField({
+	label: 'settings.rebuildOnChange'|t('product-feeds'),
+	instructions: 'settings.rebuildOnChangeInstructions'|t('product-feeds'),
+	id: 'rebuildOnChange',
+	name: 'rebuildOnChange',
+	on: settings.rebuildOnChange,
+}) }}

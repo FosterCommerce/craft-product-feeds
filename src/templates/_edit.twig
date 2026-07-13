@@ -1,0 +1,377 @@
+{% extends '_layouts/cp' %}
+{% import '_includes/forms' as forms %}
+
+{% do view.registerTranslations('product-feeds', [
+	'imageTest.belowMinimum',
+	'imageTest.meetsMinimum',
+]) %}
+
+{% set readOnly = not canEdit %}
+{% set title = feed.id ? feed.name : 'feed.new'|t('product-feeds') %}
+{% set fullPageForm = not readOnly %}
+{% set crumbs = [
+	{ label: 'nav.productFeeds'|t('product-feeds'), url: url('product-feeds', { site: site.handle }) },
+] %}
+
+{% if readOnly %}
+	{% set contentNotice = readOnlyNotice() %}
+{% endif %}
+
+{# A feed belongs to the site it was created on, so the crumb names it rather than offering a switch. #}
+{% if craft.app.getIsMultiSite() %}
+	{% set crumbs = crumbs|merge([{ id: 'site-crumb', icon: 'world', label: site.name|t('site') }]) %}
+{% endif %}
+
+{% set tabs = {
+	settings: { label: 'edit.settingsTab'|t('product-feeds'), url: '#settings' },
+	mapping: { label: 'edit.mappingTab'|t('product-feeds'), url: '#mapping' },
+} %}
+
+{% set imageAttribute = spec.imageAttribute() %}
+{% set galleryAttribute = spec.galleryAttribute() %}
+{% set derivedAttributes = spec.derivedAttributes() %}
+
+{% block actionButton %}
+	<div class="btngroup">
+		{% if not readOnly %}
+			<button type="submit" class="btn submit">{{ 'Save'|t('app') }}</button>
+		{% endif %}
+		{% if feed.id and (canBuild or not readOnly) %}
+			<button type="button" class="btn submit menubtn" aria-label="{{ 'Actions'|t('app') }}"></button>
+			<div class="menu">
+				<ul>
+					{% if canBuild %}
+						<li>
+							<button class="menu-item formsubmit" type="button"
+								data-action="product-feeds/feeds/build"
+								data-param="feedId" data-value="{{ feed.id }}">
+								{{ 'feed.buildNow'|t('product-feeds') }}
+							</button>
+						</li>
+					{% endif %}
+					{% if not readOnly %}
+						<li>
+							<button class="menu-item formsubmit" type="button"
+								data-action="product-feeds/feeds/duplicate"
+								data-param="feedId" data-value="{{ feed.id }}">
+								{{ 'feed.duplicate'|t('product-feeds') }}
+							</button>
+						</li>
+						<li>
+							<button class="menu-item formsubmit" type="button"
+								data-action="product-feeds/feeds/rotate-token"
+								data-param="feedId" data-value="{{ feed.id }}"
+								data-confirm="{{ 'feed.rotateTokenConfirm'|t('product-feeds') }}">
+								{{ 'feed.rotateToken'|t('product-feeds') }}
+							</button>
+						</li>
+					{% endif %}
+				</ul>
+			</div>
+		{% endif %}
+	</div>
+{% endblock %}
+
+{% block content %}
+	{% if not readOnly %}
+		<input type="hidden" name="action" value="product-feeds/feeds/save">
+		{{ redirectInput('product-feeds/{id}') }}
+		{% if feed.id %}<input type="hidden" name="feedId" value="{{ feed.id }}">{% endif %}
+	{% endif %}
+	<input type="hidden" id="siteId" name="siteId" value="{{ site.id }}">
+
+	<div id="settings">
+		{{ forms.lightswitchField({
+			first: true,
+			label: 'feed.enabledLabel'|t('product-feeds'),
+			id: 'enabled',
+			name: 'enabled',
+			on: feed.enabled,
+			disabled: readOnly,
+		}) }}
+
+		{{ forms.textField({
+			label: 'feed.nameLabel'|t('product-feeds'),
+			id: 'name',
+			name: 'name',
+			value: feed.name,
+			errors: feed.getErrors('name'),
+			required: true,
+			disabled: readOnly,
+		}) }}
+
+		{{ forms.textField({
+			label: 'feed.handleLabel'|t('product-feeds'),
+			id: 'handle',
+			name: 'handle',
+			class: 'code',
+			autocorrect: false,
+			autocapitalize: false,
+			value: feed.handle,
+			errors: feed.getErrors('handle'),
+			data: { 'error-key': 'handle' },
+			required: true,
+			disabled: readOnly,
+		}) }}
+
+		{{ forms.selectField({
+			label: 'feed.platformLabel'|t('product-feeds'),
+			id: 'platform',
+			name: 'platform',
+			options: platformOptions,
+			value: feed.platform,
+			disabled: readOnly,
+		}) }}
+
+		{{ forms.selectField({
+			label: 'feed.sourceLabel'|t('product-feeds'),
+			instructions: 'feed.sourceInstructions'|t('product-feeds'),
+			id: 'source',
+			name: 'source',
+			options: sourceOptions,
+			value: feed.source,
+			disabled: readOnly,
+		}) }}
+
+		<div id="source-ids">
+			{% include 'product-feeds/_includes/source-ids' %}
+		</div>
+
+		{% if filterCondition %}
+			<div class="field" id="feed-filter">
+				<div class="heading">
+					<label>{{ 'feed.filterLabel'|t('product-feeds') }}</label>
+				</div>
+				<div class="instructions"><p>{{ 'feed.filterInstructions'|t('product-feeds') }}</p></div>
+				<div class="input">{{ filterCondition.getBuilderHtml()|raw }}</div>
+			</div>
+		{% endif %}
+
+		<div id="image-transform" class="field">
+			{{ forms.selectField({
+				label: 'feed.imageEngineLabel'|t('product-feeds'),
+				instructions: 'feed.imageTransformInstructions'|t('product-feeds'),
+				id: 'imageEngine',
+				name: 'imageEngine',
+				options: imageEngineOptions,
+				value: feed.imageEngine,
+				disabled: readOnly,
+			}) }}
+
+			{% set imageSizeNote = spec.imageSizeNote() %}
+			{% if imageSizeNote %}
+				<p class="light">{{ imageSizeNote|t('product-feeds') }}</p>
+			{% endif %}
+
+			<div id="image-craft-transform" class="{{ feed.imageEngine == 'craft' ? '' : 'hidden' }}">
+				{{ forms.selectField({
+					label: 'feed.craftTransformLabel'|t('product-feeds'),
+					id: 'imageTransform',
+					name: 'imageTransform',
+					options: craftTransformOptions,
+					value: feed.imageTransform,
+					disabled: readOnly,
+				}) }}
+			</div>
+
+			<div id="image-size" class="{{ feed.imageEngine == 'none' ? 'hidden' : '' }}">
+				<div class="flex">
+					{{ forms.textField({
+						label: 'feed.imageWidthLabel'|t('product-feeds'),
+						id: 'imageWidth',
+						name: 'imageWidth',
+						type: 'number',
+						size: 6,
+						value: feed.imageWidth,
+						disabled: readOnly,
+					}) }}
+					{{ forms.textField({
+						label: 'feed.imageHeightLabel'|t('product-feeds'),
+						id: 'imageHeight',
+						name: 'imageHeight',
+						type: 'number',
+						size: 6,
+						value: feed.imageHeight,
+						disabled: readOnly,
+					}) }}
+					{{ forms.selectField({
+						label: 'feed.imageFitLabel'|t('product-feeds'),
+						id: 'imageFit',
+						name: 'imageFit',
+						options: imageFitOptions,
+						value: feed.imageFit,
+						disabled: readOnly,
+					}) }}
+				</div>
+			</div>
+
+			{% if feed.siteId and canBuild %}
+				<div id="image-test" class="{{ feed.imageEngine == 'none' ? 'hidden' : '' }}">
+					<button id="test-image" type="button" class="btn" data-image-attribute="{{ imageAttribute }}">{{ 'imageTest.button'|t('product-feeds') }}</button>
+					<div id="image-test-output"></div>
+				</div>
+			{% endif %}
+		</div>
+
+		{% if sourcesWithoutUrls %}
+			<p class="warning has-icon">
+				<span class="icon" aria-hidden="true"></span>
+				<span>{{ 'error.sourcesWithoutUrls'|t('product-feeds', { names: sourcesWithoutUrls|join(', ') }) }}</span>
+			</p>
+		{% endif %}
+
+		{% if feedUrl %}
+			{{ forms.copytextField({
+				label: 'feed.urlLabel'|t('product-feeds'),
+				instructions: 'feed.urlInstructions'|t('product-feeds'),
+				id: 'feedUrl',
+				value: feedUrl,
+			}) }}
+
+			{% set urlCheck = feed.lastBuildDiagnostics.urlCheck ?? null %}
+			{% if urlCheck %}
+				{% if urlCheck.status == 200 %}
+					<p class="notice has-icon">
+						<span class="icon" aria-hidden="true"></span>
+						<span>{{ 'feed.urlReachable'|t('product-feeds', { contentType: urlCheck.contentType ?? '?' }) }}</span>
+					</p>
+				{% else %}
+					<p class="warning has-icon">
+						<span class="icon" aria-hidden="true"></span>
+						<span>{{ 'feed.urlUnreachable'|t('product-feeds', { detail: urlCheck.error ?? urlCheck.status }) }}</span>
+					</p>
+				{% endif %}
+			{% endif %}
+		{% endif %}
+	</div>
+
+	<div id="mapping" class="hidden">
+		{% if unmappedRequired %}
+			<p class="warning has-icon">
+				<span class="icon" aria-hidden="true"></span>
+				<span>{{ 'error.requiredAttributesUnmapped'|t('product-feeds', { attributes: unmappedRequired|join(', ') }) }}</span>
+			</p>
+		{% endif %}
+
+		{% for error in feed.getErrors('fieldMapping') %}
+			<p class="error">{{ error }}</p>
+		{% endfor %}
+
+		<table class="data fullwidth pf-mapping-table">
+			<thead>
+				<tr>
+					<th scope="col">{{ 'mapping.attributeColumn'|t('product-feeds') }}</th>
+					<th scope="col">{{ 'mapping.sourceColumn'|t('product-feeds') }}</th>
+					<th scope="col">{{ 'mapping.defaultColumn'|t('product-feeds') }}</th>
+					<th scope="col">{{ 'mapping.dataIssuesColumn'|t('product-feeds') }}</th>
+				</tr>
+			</thead>
+			<tbody>
+				{% for name, definition in spec.attributes() %}
+					{% if name not in computedAttributes and name not in derivedAttributes %}
+						{% set defaultSource = name == galleryAttribute ? imageOverflow : noInclude %}
+						{% set row = feed.fieldMapping[name] ?? { source: defaultSource, default: '' } %}
+						<tr>
+							<th scope="row">
+								<code>{{ name }}</code>
+								{% if definition.required %}<span class="required" aria-hidden="true"></span>{% endif %}
+								{% if definition.note %}<span class="info">{{ definition.note|t('product-feeds') }}</span>{% endif %}
+
+								{% set docUrl = spec.docUrl(name) %}
+								{% if docUrl %}
+									<div class="instructions pf-attribute-doc">
+										<a class="go" href="{{ docUrl }}" target="_blank" rel="noopener">
+											{{ 'mapping.docLink'|t('product-feeds', { platform: feed.getPlatform().label() }) }}
+										</a>
+									</div>
+								{% endif %}
+							</th>
+							<td>
+								{{ forms.select({
+									name: 'fieldMapping[' ~ name ~ '][source]',
+									options: mappingOptions[name] ?? [],
+									value: row.source,
+									disabled: readOnly,
+								}) }}
+							</td>
+							<td>
+								{# The gallery takes its images from the main image's overflow or its own field, so a default would never be read. #}
+								{% if name == galleryAttribute %}
+									<span class="light">-</span>
+								{% elseif name == imageAttribute %}
+									{{ forms.elementSelect({
+										name: 'fieldMapping[' ~ name ~ '][default]',
+										elementType: 'craft\\elements\\Asset',
+										selectionLabel: 'mapping.chooseDefaultImage'|t('product-feeds'),
+										criteria: { kind: 'image' },
+										limit: 1,
+										elements: defaultImage ? [defaultImage] : [],
+										disabled: readOnly,
+									}) }}
+								{% elseif definition.values|length %}
+									{% set valueOptions = [{ label: '', value: '' }] %}
+									{% for value in definition.values %}
+										{% set valueOptions = valueOptions|merge([{ label: value, value: value }]) %}
+									{% endfor %}
+									{{ forms.select({
+										name: 'fieldMapping[' ~ name ~ '][default]',
+										options: valueOptions,
+										value: row.default,
+										disabled: readOnly,
+									}) }}
+								{% else %}
+									{{ forms.text({
+										name: 'fieldMapping[' ~ name ~ '][default]',
+										value: row.default,
+										disabled: readOnly,
+									}) }}
+								{% endif %}
+							</td>
+							<td>
+								{% set blanks = feed.lastBuildDiagnostics.blankByAttribute[name] ?? null %}
+								{% set invalid = feed.lastBuildDiagnostics.invalidByAttribute[name] ?? null %}
+								{% if blanks %}
+									<div class="error">{{ 'mapping.blankItems'|t('product-feeds', { n: blanks }) }}</div>
+								{% endif %}
+								{% if invalid %}
+									<div class="warning">{{ 'mapping.nonPositivePrice'|t('product-feeds', { n: invalid }) }}</div>
+								{% endif %}
+								{% if not blanks and not invalid %}
+									{% if row.source != noInclude and name != galleryAttribute and feed.lastBuildItemCount %}
+										<div class="success">{{ 'mapping.setOnAllItems'|t('product-feeds', { n: feed.lastBuildItemCount }) }}</div>
+									{% else %}
+										<span class="light">-</span>
+									{% endif %}
+								{% endif %}
+							</td>
+						</tr>
+					{% endif %}
+				{% endfor %}
+			</tbody>
+		</table>
+
+		{% set mappingNote = spec.mappingNote() %}
+		{% if mappingNote %}
+			<p class="light">{{ mappingNote|t('product-feeds') }}</p>
+		{% endif %}
+
+		{% include 'product-feeds/_includes/excluded-products' %}
+
+		<hr>
+
+		<h2>{{ 'preview.heading'|t('product-feeds') }}</h2>
+
+		{% if feed.id and canBuild %}
+			<p class="light">{{ 'preview.instructions'|t('product-feeds') }}</p>
+			<button id="preview-feed" type="button" class="btn" data-feed-id="{{ feed.id }}">{{ 'preview.button'|t('product-feeds') }}</button>
+			<div id="preview-output"></div>
+		{% else %}
+			<p class="notice has-icon">
+				<span class="icon" aria-hidden="true"></span>
+				<span>{{ 'preview.saveFirst'|t('product-feeds') }}</span>
+			</p>
+		{% endif %}
+	</div>
+
+	{% include 'product-feeds/_includes/plugin-footer' %}
+{% endblock %}
