@@ -1,0 +1,112 @@
+/* Craft colour variables so the credit reads in dark mode. Gold is the brand colour, hover only. */
+.fc-plugin-footer { text-align: right; padding: 28px 24px 24px; margin-top: 1.5rem; }
+.fc-plugin-credit {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	text-decoration: none;
+	color: var(--medium-text-color);
+	font-size: 12px;
+	transition: color 0.2s ease;
+}
+.fc-plugin-credit:hover { color: var(--text-color); }
+.fc-credit-text {
+	opacity: 0;
+	transform: translateX(8px);
+	transition: opacity 0.3s ease 0.1s, transform 0.3s ease 0.1s;
+}
+.fc-plugin-credit:hover .fc-credit-text {
+	opacity: 1;
+	transform: translateX(0);
+}
+.fc-credit-logo { display: flex; align-items: center; }
+.fc-fc-logo {
+	width: 100px;
+	height: 25px;
+	color: var(--medium-text-color);
+	transition: color 0.3s ease;
+}
+.fc-fc-logo path[fill="#D8AF7C"] { fill: currentcolor; transition: fill 0.3s ease; }
+.fc-plugin-credit:hover .fc-fc-logo { color: var(--text-color); }
+.fc-plugin-credit:hover .fc-fc-logo path[fill="#D8AF7C"] { fill: #D8AF7C; }
+
+/* Preview */
+#preview-output { margin-top: 14px; }
+.pf-preview-item {
+	margin-bottom: 14px;
+	padding: 12px 14px;
+	border: 1px solid var(--hairline-color);
+	border-radius: var(--large-border-radius);
+}
+.pf-preview-item:last-child { margin-bottom: 0; }
+.pf-preview-head {
+	display: flex;
+	align-items: baseline;
+	flex-wrap: wrap;
+	gap: 4px 10px;
+	margin-bottom: 8px;
+}
+.pf-preview-id { font-size: 13px; font-weight: 700; }
+.pf-preview-status { font-size: 12px; }
+.pf-preview-status::before { margin-inline-end: 4px; font-weight: 700; }
+.pf-preview-ok { color: var(--fg-success); }
+.pf-preview-ok::before { content: "\2713"; }
+.pf-preview-excluded { color: var(--fg-error); }
+.pf-preview-excluded::before { content: "\26A0"; }
+.pf-preview-table th,
+.pf-preview-table td { padding-block: 4px; font-size: 12px; vertical-align: top; }
+.pf-preview-table th { width: 220px; }
+.pf-preview-table td { word-break: break-word; }
+.pf-preview-thumb {
+	max-height: 44px;
+	margin-inline-end: 4px;
+	border-radius: 3px;
+	vertical-align: middle;
+}
+
+/* Source picker */
+.pf-source-group { margin-block: 12px 4px; color: var(--medium-text-color); }
+.pf-source-group:first-child { margin-block-start: 0; }
+
+/* Mapping table */
+.pf-mapping-table th,
+.pf-mapping-table td { padding-block: 10px; vertical-align: top; }
+.pf-attribute-doc { margin-block: 6px 0; }
+.pf-attribute-doc a { font-size: 12px; }
+
+/* Fade the doc links until the row is hovered. Guarded on (hover: hover): a touch screen never
+   hovers, so the link would be unreachable at opacity 0. */
+@media (hover: hover) {
+	.pf-attribute-doc { opacity: 0; }
+	.pf-mapping-table tr:hover .pf-attribute-doc,
+	.pf-attribute-doc:focus-within { opacity: 1; }
+}
+
+@media (hover: hover) and (prefers-reduced-motion: no-preference) {
+	.pf-attribute-doc { transition: opacity 100ms ease-out; }
+}
+
+@media only screen and (width <= 767px) {
+	.pf-attribute-doc { display: none; }
+}
+
+/* Excluded products */
+.pf-excluded-list { margin: 8px 0 0; padding: 0; list-style: none; }
+.pf-excluded-item {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding-block: 4px;
+}
+.pf-excluded-reason { font-size: 12px; color: var(--fg-warning); }
+
+.pf-test-thumb { max-height: 120px; border-radius: 3px; margin-top: 8px; }
+#image-test-output { margin-top: 10px; }
+
+/* Image engine group: the JS-toggled wrapper divs would otherwise collapse Craft's field rhythm. */
+#image-craft-transform,
+#image-size,
+#image-test { margin-top: var(--m); }
+#image-size .flex { gap: var(--l); align-items: flex-end; }
+#image-size .flex > .field { margin-bottom: 0; }
+

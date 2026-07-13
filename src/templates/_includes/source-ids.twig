@@ -1,0 +1,34 @@
+{% import '_includes/forms' as forms %}
+
+{% if selectableSourceGroups|length %}
+	<div class="field">
+		<div class="heading">
+			<label>{{ (feed.source == 'entries' ? 'feed.entryTypesLabel' : 'feed.productTypesLabel')|t('product-feeds') }}</label>
+		</div>
+		<div class="instructions"><p>{{ 'feed.sourceIdsInstructions'|t('product-feeds') }}</p></div>
+		<div class="input">
+			{# Unchecking every box posts an empty value, which is stored as "include every one". #}
+			{{ hiddenInput('sourceIds', '') }}
+
+			{% for group in selectableSourceGroups %}
+				{% if group.heading %}
+					<h6 class="pf-source-group">{{ group.heading }}</h6>
+				{% endif %}
+				<div class="checkbox-group">
+					{% for option in group.options %}
+						{{ forms.checkbox({
+							name: 'sourceIds[]',
+							label: option.label,
+							value: option.value,
+							checked: option.value in feed.sourceIds,
+							disabled: readOnly ?? false,
+						}) }}
+					{% endfor %}
+				</div>
+			{% endfor %}
+		</div>
+		{{ forms.errorList(feed.getErrors('sourceIds')) }}
+	</div>
+{% else %}
+	<p class="error">{{ 'error.noSourcesWithUrls'|t('product-feeds') }}</p>
+{% endif %}
