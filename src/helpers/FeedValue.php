@@ -5,7 +5,6 @@ declare(strict_types=1);
 namespace fostercommerce\productfeeds\helpers;
 
 use craft\base\ElementInterface;
-
 use craft\elements\Asset;
 use craft\elements\Category;
 use craft\elements\db\ElementQueryInterface;
@@ -16,6 +15,7 @@ use DateTimeInterface;
 use fostercommerce\productfeeds\enums\AttributeKind;
 use fostercommerce\productfeeds\models\ImageTransform;
 use Money\Currency;
+use Money\Exception\ParserException;
 use Money\Money;
 use Stringable;
 use yii\base\InvalidConfigException;
@@ -40,14 +40,22 @@ final class FeedValue
 
 	public static function moneyFromDecimal(string $amount, Currency $currency): ?Money
 	{
+		// The two guards catch different values. MoneyPHP reads an empty string as zero, and `is_numeric()`
+		// rejects it; `is_numeric()` accepts a leading `+` and exponent notation, and MoneyPHP throws on
+		// both. An unparseable price has to become a blank, which excludes the one item, where an escaping
+		// exception would fail the whole build.
 		if (! is_numeric($amount)) {
 			return null;
 		}
 
-		$money = MoneyHelper::toMoney([
-			'value' => $amount,
-			'currency' => $currency,
-		]);
+		try {
+			$money = MoneyHelper::toMoney([
+				'value' => $amount,
+				'currency' => $currency,
+			]);
+		} catch (ParserException) {
+			return null;
+		}
 
 		return $money instanceof Money ? $money : null;
 	}
@@ -104,6 +112,8 @@ final class FeedValue
 		return sprintf(
 			'%s://%s%s%s%s%s',
 			$parts['scheme'],
+			// `parse_url()` splits userinfo out of the host, so dropping it here would publish a URL with
+			// its credentials stripped.
 			isset($parts['user']) ? $parts['user'] . (isset($parts['pass']) ? ':' . $parts['pass'] : '') . '@' : '',
 			$parts['host'],
 			isset($parts['port']) ? ':' . $parts['port'] : '',

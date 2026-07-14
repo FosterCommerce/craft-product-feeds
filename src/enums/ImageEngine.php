@@ -9,6 +9,8 @@ use fostercommerce\productfeeds\ProductFeeds;
 
 enum ImageEngine: string
 {
+	use EnumValuesTrait;
+
 	case None = 'none';
 
 	case Craft = 'craft';
@@ -19,7 +21,12 @@ enum ImageEngine: string
 
 	public function label(): string
 	{
-		return Craft::t(ProductFeeds::HANDLE, sprintf('imageEngine.%s', $this->value));
+		return match ($this) {
+			self::None => Craft::t(ProductFeeds::HANDLE, 'imageEngine.none'),
+			self::Craft => Craft::t(ProductFeeds::HANDLE, 'imageEngine.craft'),
+			self::ImagerX => Craft::t(ProductFeeds::HANDLE, 'imageEngine.imagerx'),
+			self::SmallPics => Craft::t(ProductFeeds::HANDLE, 'imageEngine.smallpics'),
+		};
 	}
 
 	public function isAvailable(): bool

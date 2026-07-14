@@ -9,7 +9,11 @@ use fostercommerce\productfeeds\ProductFeeds;
 
 enum Platform: string
 {
+	use EnumValuesTrait;
+
 	case Google = 'google';
+
+	case Klaviyo = 'klaviyo';
 
 	case Meta = 'meta';
 
@@ -23,6 +27,7 @@ enum Platform: string
 	{
 		return match ($this) {
 			self::Google => Craft::t(ProductFeeds::HANDLE, 'platform.google'),
+			self::Klaviyo => Craft::t(ProductFeeds::HANDLE, 'platform.klaviyo'),
 			self::Meta => Craft::t(ProductFeeds::HANDLE, 'platform.meta'),
 			self::Microsoft => Craft::t(ProductFeeds::HANDLE, 'platform.microsoft'),
 			self::Pinterest => Craft::t(ProductFeeds::HANDLE, 'platform.pinterest'),

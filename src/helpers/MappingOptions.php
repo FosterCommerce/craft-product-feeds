@@ -20,14 +20,9 @@ final class MappingOptions
 	 */
 	public static function forSource(FeedSource $source, FeedSpec $spec): array
 	{
-		$unmappable = [...$source->computedAttributes(), ...$spec->derivedAttributes()];
 		$options = [];
 
-		foreach ($spec->attributes() as $name => $attributeDefinition) {
-			if (in_array($name, $unmappable, true)) {
-				continue;
-			}
-
+		foreach ($source->mappableAttributes($spec) as $name => $attributeDefinition) {
 			$options[$name] = self::forAttribute($source, $spec, $attributeDefinition);
 		}
 
@@ -38,25 +33,11 @@ final class MappingOptions
 	 * @return array<int, array<string, string>>
 	 * @throws InvalidConfigException
 	 */
-	private static function forAttribute(FeedSource $source, FeedSpec $spec, AttributeDefinition $definition): array
+	private static function forAttribute(FeedSource $source, FeedSpec $spec, AttributeDefinition $attributeDefinition): array
 	{
-		if ($definition->name === $spec->galleryAttribute()) {
-			return array_merge([
-				[
-					'label' => Craft::t(ProductFeeds::HANDLE, 'mapping.dontInclude'),
-					'value' => Mapping::NO_INCLUDE,
-				],
-				[
-					'label' => Craft::t(ProductFeeds::HANDLE, 'mapping.imageOverflow', [
-						'attribute' => $spec->imageAttribute(),
-					]),
-					'value' => Mapping::IMAGE_OVERFLOW,
-				],
-			], self::fieldOptions($source, $definition));
-		}
-
+		// A required attribute cannot be left out, so its row opens blank instead: the admin has to choose.
 		$options = [
-			$definition->required
+			$attributeDefinition->required
 				? [
 					'label' => '',
 					'value' => '',
@@ -65,14 +46,28 @@ final class MappingOptions
 					'label' => Craft::t(ProductFeeds::HANDLE, 'mapping.dontInclude'),
 					'value' => Mapping::NO_INCLUDE,
 				],
-			[
-				'label' => Craft::t(ProductFeeds::HANDLE, 'mapping.useDefaultValue'),
-				'value' => Mapping::USE_DEFAULT,
-			],
+		];
+
+		// The gallery fills itself from the main image's leftovers or from a field of its own, so it takes
+		// neither a default nor an element value.
+		if ($attributeDefinition->name === $spec->galleryAttribute()) {
+			$options[] = [
+				'label' => Craft::t(ProductFeeds::HANDLE, 'mapping.imageOverflow', [
+					'attribute' => $spec->imageAttribute(),
+				]),
+				'value' => Mapping::IMAGE_OVERFLOW,
+			];
+
+			return array_merge($options, self::fieldOptions($source, $attributeDefinition));
+		}
+
+		$options[] = [
+			'label' => Craft::t(ProductFeeds::HANDLE, 'mapping.useDefaultValue'),
+			'value' => Mapping::USE_DEFAULT,
 		];
 
 		// No native element value is an image, so image attributes offer field sources only.
-		if ($definition->attributeKind !== AttributeKind::Image) {
+		if ($attributeDefinition->attributeKind !== AttributeKind::Image) {
 			foreach ($source->elementPaths() as $groupLabel => $paths) {
 				if ($paths === []) {
 					continue;
@@ -91,14 +86,14 @@ final class MappingOptions
 			}
 		}
 
-		return array_merge($options, self::fieldOptions($source, $definition));
+		return array_merge($options, self::fieldOptions($source, $attributeDefinition));
 	}
 
 	/**
 	 * @return array<int, array<string, string>>
 	 * @throws InvalidConfigException
 	 */
-	private static function fieldOptions(FeedSource $source, AttributeDefinition $definition): array
+	private static function fieldOptions(FeedSource $source, AttributeDefinition $attributeDefinition): array
 	{
 		$options = [];
 		$fieldGroupLabels = $source->fieldGroupLabels();
@@ -108,7 +103,7 @@ final class MappingOptions
 
 			foreach ($layouts as $layout) {
 				foreach ($layout->getCustomFields() as $field) {
-					if ($field->handle !== null && $definition->attributeKind->acceptsField($field)) {
+					if ($field->handle !== null && $attributeDefinition->attributeKind->acceptsField($field)) {
 						$fields[$field->handle] = (string) $field->name;
 					}
 				}

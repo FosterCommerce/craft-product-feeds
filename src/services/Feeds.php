@@ -11,13 +11,11 @@ use craft\errors\FsException;
 use craft\helpers\DateTimeHelper;
 use craft\helpers\Db;
 use craft\helpers\Json;
-use craft\helpers\Queue;
 use craft\helpers\UrlHelper;
 use DateTime;
 use fostercommerce\productfeeds\enums\BuildStatus;
 use fostercommerce\productfeeds\errors\FeedBuildException;
 use fostercommerce\productfeeds\helpers\Mapping;
-use fostercommerce\productfeeds\jobs\BuildFeed;
 use fostercommerce\productfeeds\models\BuildDiagnostics;
 use fostercommerce\productfeeds\models\BuildResult;
 use fostercommerce\productfeeds\models\Feed;
@@ -26,20 +24,10 @@ use fostercommerce\productfeeds\models\UrlCheck;
 use fostercommerce\productfeeds\ProductFeeds;
 use fostercommerce\productfeeds\records\Feed as FeedRecord;
 use yii\base\Exception;
+use yii\base\InvalidArgumentException;
 
 class Feeds extends Component
 {
-	/**
-	 * A build is queued but has not started. Long enough to outlive a backed-up queue: an expiry queues a
-	 * second job for the same feed, which the build lock then reduces to a redundant rebuild.
-	 */
-	private const PENDING_TTL = 300;
-
-	/**
-	 * An edit landed while a build was already running.
-	 */
-	private const DIRTY_TTL = 7200;
-
 	/**
 	 * @return Feed[]
 	 */
@@ -77,6 +65,18 @@ class Feeds extends Component
 		return $record === null ? null : $this->toModel($record);
 	}
 
+	/**
+	 * Every site's feed of that handle: a handle is only unique within its site.
+	 *
+	 * @return Feed[]
+	 */
+	public function getFeedsByHandle(string $handle): array
+	{
+		return $this->findFeeds([
+			'handle' => $handle,
+		]);
+	}
+
 	public function getFeedByToken(string $token): ?Feed
 	{
 		$record = FeedRecord::findOne([
@@ -99,11 +99,7 @@ class Feeds extends Component
 			return false;
 		}
 
-		$record = $feed->id === null
-			? new FeedRecord()
-			: FeedRecord::findOne([
-				'id' => $feed->id,
-			]) ?? new FeedRecord();
+		$record = $feed->id === null ? new FeedRecord() : $this->requireRecord($feed);
 
 		$record->name = $feed->name;
 		$record->handle = $feed->handle;
@@ -138,16 +134,12 @@ class Feeds extends Component
 		?BuildResult $result = null,
 		?string $error = null,
 	): void {
-		$record = FeedRecord::findOne([
-			'id' => $feed->id,
-		]);
-
-		if ($record === null) {
-			return;
-		}
-
+		$record = $this->requireRecord($feed);
 		$record->lastBuildStatus = $status->value;
-		$record->lastBuildStartedAt = $startedAt instanceof DateTime ? Db::prepareDateForDb($startedAt) : $record->lastBuildStartedAt;
+
+		if ($startedAt instanceof DateTime) {
+			$record->lastBuildStartedAt = Db::prepareDateForDb($startedAt);
+		}
 
 		// A build in progress keeps the previous run's numbers: the old feed is still the one being served.
 		if ($status === BuildStatus::Building) {
@@ -158,7 +150,7 @@ class Feeds extends Component
 
 		$record->lastBuildFinishedAt = Db::prepareDateForDb(new DateTime());
 		$record->lastBuildItemCount = $result?->itemCount;
-		$record->lastBuildSkippedCount = $result?->skippedCount();
+		$record->lastBuildSkippedCount = $result?->buildDiagnostics->skippedCount();
 		$record->lastBuildBytes = $result?->bytes;
 		$record->lastBuildBytesUncompressed = $result?->bytesUncompressed;
 		$record->lastBuildError = $error;
@@ -166,20 +158,9 @@ class Feeds extends Component
 		$record->save(false);
 	}
 
-	/**
-	 * Kept apart from `recordBuild()` because the check only means anything once the feed row carries the
-	 * artifact's size: the route 404s until it does.
-	 */
 	public function recordUrlCheck(Feed $feed, UrlCheck $urlCheck): void
 	{
-		$record = FeedRecord::findOne([
-			'id' => $feed->id,
-		]);
-
-		if ($record === null) {
-			return;
-		}
-
+		$record = $this->requireRecord($feed);
 		$diagnostics = BuildDiagnostics::fromArray($this->decodeArray($record->lastBuildDiagnostics));
 		$diagnostics->urlCheck = $urlCheck;
 
@@ -197,7 +178,7 @@ class Feeds extends Component
 			return;
 		}
 
-		$this->deleteArtifact($feed);
+		$this->deletePaths([$feed->getPath(), $feed->getExcludedReportPath()]);
 
 		FeedRecord::deleteAll([
 			'id' => $id,
@@ -209,46 +190,54 @@ class Feeds extends Component
 	 */
 	public function duplicateFeed(Feed $feed): ?Feed
 	{
-		$duplicate = new Feed([
-			'name' => Craft::t(ProductFeeds::HANDLE, 'feed.copyOf', [
-				'name' => $feed->name,
-			]),
-			'handle' => $this->uniqueHandle($feed->handle, (int) $feed->siteId),
-			'platform' => $feed->platform,
-			'source' => $feed->source,
-			'siteId' => $feed->siteId,
-			'sourceIds' => $feed->sourceIds,
-			'fieldMapping' => $feed->fieldMapping,
-			'filterCondition' => $feed->filterCondition,
-			'imageEngine' => $feed->imageEngine,
-			'imageTransform' => $feed->imageTransform,
-			'imageWidth' => $feed->imageWidth,
-			'imageHeight' => $feed->imageHeight,
-			'imageFit' => $feed->imageFit,
-			'token' => $this->generateToken(),
-			'enabled' => false,
+		// A copy carries every setting across. Only what has to be unique differs.
+		$duplicate = clone $feed;
+		$duplicate->id = null;
+		$duplicate->uid = null;
+		$duplicate->name = Craft::t(ProductFeeds::HANDLE, 'feed.copyOf', [
+			'name' => $feed->name,
 		]);
+		$duplicate->handle = $this->uniqueHandle($feed->handle, (int) $feed->siteId);
+		$duplicate->token = $this->generateToken();
+		$duplicate->enabled = false;
+		$duplicate->sortOrder = null;
+
+		// The copy has never been built, and `saveFeed()` doesn't write the build columns, so the new row
+		// comes up at its defaults. The clone has to be reset to match, diagnostics included: `clone` is
+		// shallow, so both feeds would otherwise share one `BuildDiagnostics`.
+		$duplicate->lastBuildStatus = BuildStatus::Pending->value;
+		$duplicate->lastBuildStartedAt = null;
+		$duplicate->lastBuildFinishedAt = null;
+		$duplicate->lastBuildItemCount = null;
+		$duplicate->lastBuildSkippedCount = null;
+		$duplicate->lastBuildBytes = null;
+		$duplicate->lastBuildBytesUncompressed = null;
+		$duplicate->lastBuildError = null;
+		$duplicate->lastBuildDiagnostics = new BuildDiagnostics();
 
 		return $this->saveFeed($duplicate) ? $duplicate : null;
 	}
 
 	/**
-	 * The old artifact's paths are taken before the token is minted, because `Feed::getPath()` derives
-	 * from the token. They are only deleted once the new token is persisted, so a failed save leaves the
-	 * feed serving the file its stored token still points at.
+	 * Gives a feed a new token, moving its artifact to the URL the new token serves from.
 	 *
 	 * @throws Exception
 	 * @throws FsException
 	 */
 	public function rotateToken(Feed $feed): bool
 	{
+		// The path derives from the token.
 		$previousToken = $feed->token;
 		$previousPaths = [$feed->getPath(), $feed->getExcludedReportPath()];
 
 		$feed->token = $this->generateToken();
+		$rotatedPaths = [$feed->getPath(), $feed->getExcludedReportPath()];
+
+		$this->copyPaths(array_combine($previousPaths, $rotatedPaths));
 
 		if (! $this->saveFeed($feed)) {
 			$feed->token = $previousToken;
+			$this->deletePaths($rotatedPaths);
 
 			return false;
 		}
@@ -259,11 +248,12 @@ class Feeds extends Component
 	}
 
 	/**
-	 * @throws FsException
+	 * Whether a feed has somewhere to be written. A handle naming a filesystem that no longer exists does
+	 * not count: a build would fail on it.
 	 */
-	public function deleteArtifact(Feed $feed): void
+	public function hasFs(): bool
 	{
-		$this->deletePaths([$feed->getPath(), $feed->getExcludedReportPath()]);
+		return $this->findFs() instanceof FsInterface;
 	}
 
 	/**
@@ -271,9 +261,9 @@ class Feeds extends Component
 	 */
 	public function getFs(): FsInterface
 	{
-		$handle = $this->settings()->fsHandle;
+		$handle = $this->fsHandle();
 
-		if ($handle === null || $handle === '') {
+		if ($handle === null) {
 			throw new FeedBuildException(Craft::t(ProductFeeds::HANDLE, 'error.noFilesystem'));
 		}
 
@@ -288,24 +278,31 @@ class Feeds extends Component
 	}
 
 	/**
-	 * Always the plugin's own route: the filesystem the feed is written to need not have a public URL,
-	 * and the route also serves the inflated feed.
+	 * The filesystem, or null where the plugin has none configured.
+	 */
+	public function findFs(): ?FsInterface
+	{
+		try {
+			return $this->getFs();
+		} catch (FeedBuildException) {
+			return null;
+		}
+	}
+
+	/**
+	 * Always the plugin's own route: the filesystem need not have a public URL, and the route also
+	 * serves the inflated feed.
 	 *
 	 * @throws Exception
 	 */
 	public function getFeedUrl(Feed $feed): string
 	{
-		return UrlHelper::siteUrl(
-			sprintf('%s/%s-%s.%s.gz', ProductFeeds::FILE_PREFIX, $feed->handle, $feed->token, $feed->getSpec()->fileExtension()),
-			null,
-			null,
-			$feed->siteId
-		);
+		return UrlHelper::siteUrl($feed->getUrlPath(), null, null, $feed->siteId);
 	}
 
 	/**
-	 * The token is the only credential on the public feed route, so it comes from Craft's CSPRNG rather
-	 * than `StringHelper::randomString()`, which is not cryptographically secure.
+	 * `StringHelper::randomString()` draws from 26 lowercase letters; the security component's alphabet is
+	 * far wider for the same length.
 	 *
 	 * @throws Exception
 	 */
@@ -315,148 +312,35 @@ class Feeds extends Component
 	}
 
 	/**
-	 * @param int[] $ids in their new order
+	 * @param int[] $feedIds in their new order
 	 */
-	public function reorderFeeds(array $ids): void
+	public function reorderFeeds(array $feedIds): void
 	{
-		foreach ($ids as $sortOrder => $id) {
+		foreach ($feedIds as $sortOrder => $feedId) {
 			FeedRecord::updateAll([
 				'sortOrder' => $sortOrder + 1,
 			], [
-				'id' => $id,
+				'id' => $feedId,
 			]);
 		}
 	}
 
-	public function enqueueDueBuilds(): int
-	{
-		$interval = $this->settings()->buildInterval;
-		$queued = 0;
-
-		foreach ($this->getEnabledFeeds() as $feed) {
-			if (! $this->isDue($feed, $interval)) {
-				continue;
-			}
-
-			$this->requestBuild((int) $feed->id);
-			$queued++;
-		}
-
-		return $queued;
-	}
-
-	public function isDue(Feed $feed, int $interval): bool
-	{
-		$now = DateTimeHelper::currentUTCDateTime()->getTimestamp();
-
-		if ($feed->getLastBuildStatus() === BuildStatus::Building) {
-			// A worker killed mid-build never clears the status, so without a timeout the feed never rebuilds.
-			$timeout = $this->settings()->buildTimeout;
-			$startedAt = $feed->lastBuildStartedAt;
-
-			return $startedAt instanceof DateTime && $now - $startedAt->getTimestamp() > $timeout;
-		}
-
-		// A flag set just as the build that would have consumed it was finishing has no job left to act on
-		// it, so the scheduled pass takes it rather than the edit waiting a full interval.
-		if ($this->isBuildDirty((int) $feed->id)) {
-			return true;
-		}
-
-		if (! $feed->lastBuildFinishedAt instanceof DateTime) {
-			return true;
-		}
-
-		return $now - $feed->lastBuildFinishedAt->getTimestamp() >= $interval;
-	}
-
 	/**
-	 * Queues a build now, unless one is already queued and waiting to start. Saving a product fires an
-	 * element save per variant, and this collapses those into one build.
+	 * @throws InvalidArgumentException if the feed no longer exists
 	 */
-	public function requestBuild(int $feedId): void
+	private function requireRecord(Feed $feed): FeedRecord
 	{
-		$cache = Craft::$app->getCache();
-		$key = $this->pendingKey($feedId);
+		$record = FeedRecord::findOne([
+			'id' => $feed->id,
+		]);
 
-		if ($cache !== null) {
-			if ($cache->get($key) !== false) {
-				return;
-			}
-
-			$cache->set($key, true, self::PENDING_TTL);
+		if (! $record instanceof FeedRecord) {
+			// Deleting the feed mid-build gets here. Writing to a fresh record would insert a second row
+			// under the same handle instead.
+			throw new InvalidArgumentException(sprintf('Feed %s no longer exists.', $feed->id));
 		}
 
-		Queue::push(new BuildFeed([
-			'feedId' => $feedId,
-		]));
-	}
-
-	public function isBuildPending(int $feedId): bool
-	{
-		$cache = Craft::$app->getCache();
-
-		return $cache !== null && $cache->get($this->pendingKey($feedId)) !== false;
-	}
-
-	/**
-	 * Drops the flag that collapses a burst of edits into one queued build.
-	 *
-	 * Every job that stops absorbing edits must clear it, or `requestBuild()` no-ops until the flag
-	 * expires and the edits made in that window wait for the next interval build.
-	 */
-	public function clearPending(int $feedId): void
-	{
-		Craft::$app->getCache()?->delete($this->pendingKey($feedId));
-	}
-
-	/**
-	 * The lock a build holds, whether it runs in the queue or inline in the console. Two builds of one
-	 * feed write the same temporary file and publish over each other.
-	 *
-	 * Keyed by ID, not handle: a handle is only unique within its site.
-	 */
-	public function buildLockName(Feed $feed): string
-	{
-		return sprintf('product-feeds:%d', $feed->id);
-	}
-
-	/**
-	 * An edit arrived while a build was running, so that build's output is already stale.
-	 *
-	 * Whoever finishes that build has to call `requestBuildIfDirty()`. Where they finished before the flag
-	 * was set, `isDue()` picks it up on the next scheduled pass instead.
-	 */
-	public function markBuildDirty(int $feedId): void
-	{
-		Craft::$app->getCache()?->set($this->dirtyKey($feedId), true, self::DIRTY_TTL);
-	}
-
-	public function isBuildDirty(int $feedId): bool
-	{
-		$cache = Craft::$app->getCache();
-
-		return $cache !== null && $cache->get($this->dirtyKey($feedId)) !== false;
-	}
-
-	public function clearBuildDirty(int $feedId): void
-	{
-		Craft::$app->getCache()?->delete($this->dirtyKey($feedId));
-	}
-
-	/**
-	 * Queues a follow-up build for the edits that landed while this one was running.
-	 *
-	 * Call it once the build lock is released, or the job queued here cannot take it.
-	 */
-	public function requestBuildIfDirty(int $feedId): void
-	{
-		if (! $this->isBuildDirty($feedId)) {
-			return;
-		}
-
-		$this->clearBuildDirty($feedId);
-		$this->requestBuild($feedId);
+		return $record;
 	}
 
 	/**
@@ -486,14 +370,31 @@ class Feeds extends Component
 	}
 
 	/**
+	 * @param array<string, string> $paths source path => destination path
+	 * @throws FsException
+	 */
+	private function copyPaths(array $paths): void
+	{
+		$fs = $this->findFs();
+		if (! $fs instanceof FsInterface) {
+			return;
+		}
+
+		foreach ($paths as $path => $destination) {
+			if ($fs->fileExists($path)) {
+				$fs->copyFile($path, $destination);
+			}
+		}
+	}
+
+	/**
 	 * @param string[] $paths
 	 * @throws FsException
 	 */
 	private function deletePaths(array $paths): void
 	{
-		try {
-			$fs = $this->getFs();
-		} catch (FeedBuildException) {
+		$fs = $this->findFs();
+		if (! $fs instanceof FsInterface) {
 			return;
 		}
 
@@ -504,22 +405,19 @@ class Feeds extends Component
 		}
 	}
 
-	private function pendingKey(int $feedId): string
-	{
-		return sprintf('product-feeds:pending:%d', $feedId);
-	}
-
-	private function dirtyKey(int $feedId): string
-	{
-		return sprintf('product-feeds:dirty:%d', $feedId);
-	}
-
 	private function settings(): Settings
 	{
-		/** @var ProductFeeds $plugin */
-		$plugin = ProductFeeds::getInstance();
+		return ProductFeeds::plugin()->getSettings();
+	}
 
-		return $plugin->getSettings();
+	/**
+	 * The settings form requires a handle, but a config file can still set it to an empty string.
+	 */
+	private function fsHandle(): ?string
+	{
+		$handle = $this->settings()->fsHandle;
+
+		return $handle === '' ? null : $handle;
 	}
 
 	private function uniqueHandle(string $handle, int $siteId): string
@@ -551,7 +449,7 @@ class Feeds extends Component
 			static fn (mixed $sourceId): string => is_scalar($sourceId) ? (string) $sourceId : '',
 			$this->decodeArray($record->sourceIds)
 		)));
-		$feed->fieldMapping = Mapping::rows($this->decodeArray($record->fieldMapping));
+		$feed->fieldMapping = Mapping::normalizeRows($this->decodeArray($record->fieldMapping));
 		$feed->filterCondition = $this->decodeArray($record->filterCondition);
 		$feed->imageEngine = $record->imageEngine;
 		$feed->imageTransform = $record->imageTransform;
@@ -576,8 +474,8 @@ class Feeds extends Component
 	}
 
 	/**
-	 * The column holds UTC and `DateTimeHelper` assumes UTC for a bare datetime string, where `DateTime`
-	 * would read it in the request's timezone.
+	 * The column holds UTC, and `DateTimeHelper` reads a bare datetime as UTC where `DateTime` would use
+	 * the request's timezone.
 	 */
 	private function toDateTime(?string $value): ?DateTime
 	{

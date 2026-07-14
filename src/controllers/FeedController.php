@@ -7,11 +7,11 @@ namespace fostercommerce\productfeeds\controllers;
 use craft\errors\FsException;
 use craft\web\Controller;
 use DateTime;
-use fostercommerce\productfeeds\errors\FeedBuildException;
 use fostercommerce\productfeeds\models\Feed;
 use fostercommerce\productfeeds\ProductFeeds;
 use yii\base\InvalidConfigException;
 use yii\web\NotFoundHttpException;
+use yii\web\RangeNotSatisfiableHttpException;
 use yii\web\Response;
 
 class FeedController extends Controller
@@ -53,7 +53,7 @@ class FeedController extends Controller
 	 */
 	private function feedFor(string $handle, string $token, string $extension): Feed
 	{
-		$feed = $this->plugin()->getFeeds()->getFeedByToken($token);
+		$feed = ProductFeeds::plugin()->getFeeds()->getFeedByToken($token);
 
 		if (
 			! $feed instanceof Feed
@@ -69,27 +69,23 @@ class FeedController extends Controller
 	}
 
 	/**
-	 * `fileSize` is mandatory. Left out, Yii sizes the stream by seeking to its end, which gives 0 for a
-	 * remote filesystem's unseekable stream and the compressed size for an inflate-filtered one. Neither
-	 * is the length of what is sent.
+	 * `fileSize` is mandatory. Without it Yii measures the stream by seeking to its end, which gives the
+	 * wrong length for both a remote file and an inflated one.
 	 *
 	 * @throws FsException
 	 * @throws InvalidConfigException
 	 * @throws NotFoundHttpException
+	 * @throws RangeNotSatisfiableHttpException
 	 */
 	private function sendFeed(Feed $feed, string $mimeType, ?int $fileSize, bool $inflate = false): Response
 	{
-		try {
-			$fs = $this->plugin()->getFeeds()->getFs();
-		} catch (FeedBuildException) {
+		$filesystem = ProductFeeds::plugin()->getFeeds()->findFs() ?? throw new NotFoundHttpException();
+
+		if ($fileSize === null || ! $filesystem->fileExists($feed->getPath())) {
 			throw new NotFoundHttpException();
 		}
 
-		if ($fileSize === null || ! $fs->fileExists($feed->getPath())) {
-			throw new NotFoundHttpException();
-		}
-
-		$stream = $fs->getFileStream($feed->getPath());
+		$stream = $filesystem->getFileStream($feed->getPath());
 
 		if ($inflate) {
 			stream_filter_append($stream, 'zlib.inflate', STREAM_FILTER_READ, [
@@ -114,13 +110,5 @@ class FeedController extends Controller
 				'fileSize' => $fileSize,
 			]
 		);
-	}
-
-	private function plugin(): ProductFeeds
-	{
-		/** @var ProductFeeds $plugin */
-		$plugin = ProductFeeds::getInstance();
-
-		return $plugin;
 	}
 }

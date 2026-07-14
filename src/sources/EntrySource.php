@@ -28,18 +28,11 @@ class EntrySource extends FeedSource
 	 */
 	public function query(): ElementQueryInterface
 	{
-		$query = Entry::find()
-			->siteId($this->feed->siteId)
-			->status(Entry::STATUS_LIVE)
+		return $this->baseQuery(Entry::STATUS_LIVE)
 			->with($this->eagerLoadPaths())
 			->orderBy([
 				'elements.id' => SORT_ASC,
 			]);
-
-		$this->applySourceIds($query);
-		$this->filterCondition()?->modifyQuery($query);
-
-		return $query;
 	}
 
 	/**
@@ -82,7 +75,7 @@ class EntrySource extends FeedSource
 		return Entry::class;
 	}
 
-	public function reads(ElementInterface $element): bool
+	public function handles(ElementInterface $element): bool
 	{
 		return $element instanceof Entry;
 	}
@@ -90,7 +83,7 @@ class EntrySource extends FeedSource
 	/**
 	 * @throws InvalidConfigException
 	 */
-	public function mightRead(ElementInterface $element): bool
+	public function mightContain(ElementInterface $element): bool
 	{
 		if (! $element instanceof Entry || $element->sectionId === null) {
 			return false;
@@ -106,13 +99,13 @@ class EntrySource extends FeedSource
 	/**
 	 * @throws InvalidConfigException
 	 */
-	public function inScope(ElementInterface $element): bool
+	public function contains(ElementInterface $element): bool
 	{
 		if (! $element instanceof Entry) {
 			return false;
 		}
 
-		return $this->scopeQuery()->id($element->id)->exists();
+		return $this->baseQuery(null)->id($element->id)->exists();
 	}
 
 	public function reportRow(ElementInterface $element, string $issue): array
@@ -166,19 +159,6 @@ class EntrySource extends FeedSource
 		];
 	}
 
-	public function selectableSourceIds(): array
-	{
-		$sourceIds = [];
-
-		foreach ($this->selectableSourceGroups() as $group) {
-			foreach ($group['options'] as $option) {
-				$sourceIds[] = $option['value'];
-			}
-		}
-
-		return $sourceIds;
-	}
-
 	public function selectableSourceGroups(): array
 	{
 		$groups = [];
@@ -203,29 +183,14 @@ class EntrySource extends FeedSource
 	}
 
 	/**
-	 * Only reports explicitly chosen entry types. An empty choice means "everything that can work".
+	 * A source key names an entry type, but URLs are configured per section, so the section is what the
+	 * admin is shown.
 	 */
-	public function sourcesWithoutUrls(): array
+	protected function sourceName(string $sourceId): ?string
 	{
-		if ($this->feed->sourceIds === []) {
-			return [];
-		}
+		$section = Craft::$app->getEntries()->getSectionById($this->sectionIdOf($sourceId));
 
-		$withUrls = $this->selectableSourceIds();
-		$names = [];
-
-		foreach ($this->feed->sourceIds as $sourceId) {
-			if (in_array($sourceId, $withUrls, true)) {
-				continue;
-			}
-
-			$section = Craft::$app->getEntries()->getSectionById($this->sectionIdOf($sourceId));
-			if ($section instanceof Section) {
-				$names[] = (string) $section->name;
-			}
-		}
-
-		return array_values(array_unique($names));
+		return $section instanceof Section ? (string) $section->name : null;
 	}
 
 	/**
@@ -244,6 +209,7 @@ class EntrySource extends FeedSource
 
 	private function entryTypeIdOf(string $sourceId): int
 	{
+		// A `sectionId` on its own is not a pair the picker can post, but it can still be sitting in a row.
 		return (int) (explode(':', $sourceId)[1] ?? '');
 	}
 
@@ -270,14 +236,17 @@ class EntrySource extends FeedSource
 	}
 
 	/**
+	 * Every entry this feed covers, at the given status.
+	 *
 	 * @return EntryQuery<int, Entry>
 	 * @throws InvalidConfigException
 	 */
-	private function scopeQuery(): EntryQuery
+	private function baseQuery(?string $status): EntryQuery
 	{
 		$query = Entry::find()
 			->siteId($this->feed->siteId)
-			->status(null);
+			->status($status);
+
 		$this->applySourceIds($query);
 		$this->filterCondition()?->modifyQuery($query);
 
@@ -292,15 +261,16 @@ class EntrySource extends FeedSource
 	private function sectionsWithUrls(): array
 	{
 		$withUrls = [];
+		$sections = Craft::$app->getEntries()->getAllSections();
 
-		foreach (Craft::$app->getEntries()->getAllSections() as $allSection) {
-			if ($allSection->type === Section::TYPE_SINGLE) {
+		foreach ($sections as $section) {
+			if ($section->type === Section::TYPE_SINGLE) {
 				continue;
 			}
 
-			$siteSettings = $allSection->getSiteSettings()[$this->feed->siteId] ?? null;
-			if ($allSection->id !== null && $siteSettings !== null && $siteSettings->hasUrls) {
-				$withUrls[] = $allSection;
+			$siteSettings = $section->getSiteSettings()[$this->feed->siteId] ?? null;
+			if ($section->id !== null && $siteSettings !== null && $siteSettings->hasUrls) {
+				$withUrls[] = $section;
 			}
 		}
 
@@ -324,22 +294,5 @@ class EntrySource extends FeedSource
 		}
 
 		return array_values($entryTypes);
-	}
-
-	/**
-	 * @return string[]
-	 */
-	private function eagerLoadPaths(): array
-	{
-		$paths = [];
-
-		foreach ($this->feed->fieldMapping as $mapping) {
-			$parsed = Mapping::parse($mapping['source']);
-			if ($parsed['kind'] === Mapping::FIELD) {
-				$paths[] = $parsed['value'];
-			}
-		}
-
-		return array_values(array_unique($paths));
 	}
 }

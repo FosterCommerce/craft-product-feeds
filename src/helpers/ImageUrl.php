@@ -5,11 +5,9 @@ declare(strict_types=1);
 namespace fostercommerce\productfeeds\helpers;
 
 use Craft;
-
 use craft\elements\Asset;
 use fostercommerce\productfeeds\enums\ImageEngine;
 use fostercommerce\productfeeds\models\ImageTransform;
-use fostercommerce\productfeeds\ProductFeeds;
 use yii\base\InvalidConfigException;
 use yii\base\Module;
 
@@ -34,45 +32,6 @@ final class ImageUrl
 	}
 
 	/**
-	 * @return array<int, array<string, string>>
-	 */
-	public static function craftTransformOptions(): array
-	{
-		$options = [[
-			'label' => Craft::t(ProductFeeds::HANDLE, 'imageTransform.customSize'),
-			'value' => '',
-		]];
-
-		foreach (Craft::$app->getImageTransforms()->getAllTransforms() as $allTransform) {
-			$options[] = [
-				'label' => (string) $allTransform->name,
-				'value' => (string) $allTransform->handle,
-			];
-		}
-
-		return $options;
-	}
-
-	/**
-	 * @return array<int, array{label: string, value: string}>
-	 */
-	public static function engineOptions(): array
-	{
-		$options = [];
-
-		foreach (ImageEngine::cases() as $engine) {
-			if ($engine->isAvailable()) {
-				$options[] = [
-					'label' => $engine->label(),
-					'value' => $engine->value,
-				];
-			}
-		}
-
-		return $options;
-	}
-
-	/**
 	 * @throws InvalidConfigException
 	 */
 	private static function craftUrl(Asset $asset, ImageTransform $transform): ?string
@@ -90,11 +49,8 @@ final class ImageUrl
 	}
 
 	/**
-	 * Both plugins expose `transformImage()` on a component and return an object with `getUrl()`, so an
-	 * engine is reached by duck typing rather than a composer dependency.
-	 *
-	 * Imager X's second argument is a transform list: it returns a single object only because
-	 * `toConfig()` is an associative array. A list would make it return an array instead.
+	 * Neither plugin is a composer dependency, so the engine is reached by duck typing: both expose
+	 * `transformImage()` on a component and return an object with `getUrl()`.
 	 *
 	 * @throws InvalidConfigException
 	 */

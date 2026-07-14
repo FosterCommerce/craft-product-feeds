@@ -28,13 +28,20 @@ enum AttributeKind: string
 	/** A ` > `-delimited category path. */
 	case CategoryPath = 'categoryPath';
 
+	/** Every value the source holds, each one a category in its own right rather than a path. */
+	case CategoryList = 'categoryList';
+
 	case Money = 'money';
+
+	/** A bare number, which a typed document writes as one rather than as a string. */
+	case Number = 'number';
 
 	public function acceptsField(FieldInterface $field): bool
 	{
 		return match ($this) {
 			self::Image => $field instanceof Assets,
-			self::Money => $field instanceof Number || $field instanceof PlainText,
+			self::Url => $field instanceof PlainText,
+			self::Money, self::Number => $field instanceof Number || $field instanceof PlainText,
 			self::CategoryPath => $field instanceof Categories || $field instanceof PlainText,
 			default => $field instanceof PlainText
 				|| $field instanceof Number

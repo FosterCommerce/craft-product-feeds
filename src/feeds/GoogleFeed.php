@@ -6,10 +6,18 @@ namespace fostercommerce\productfeeds\feeds;
 
 class GoogleFeed extends GoogleFormatFeed
 {
+	protected const HAS_IDENTIFIER_EXISTS = true;
+
+	protected const SPACED_AVAILABILITY = false;
+
 	/**
-	 * Google's own minimum. An item below it is rejected.
+	 * The size Google recommends for a non-apparel image, and the floor the plugin warns below.
+	 *
+	 * @see https://support.google.com/merchants/answer/6324350
 	 */
-	private const MINIMUM_IMAGE_SIZE = [500, 500];
+	protected const MINIMUM_IMAGE_SIZE = [500, 500];
+
+	protected const IMAGE_SIZE_NOTE = 'feed.imageSizeGoogle';
 
 	/**
 	 * Google's help page per attribute, by answer ID. The five custom labels share one page.
@@ -51,31 +59,6 @@ class GoogleFeed extends GoogleFormatFeed
 			: sprintf('https://support.google.com/merchants/answer/%d', $answer);
 	}
 
-	public function derivedAttributes(): array
-	{
-		return [self::IDENTIFIER_EXISTS];
-	}
-
-	public function minimumImageSize(): ?array
-	{
-		return self::MINIMUM_IMAGE_SIZE;
-	}
-
-	public function imageSizeNote(): ?string
-	{
-		return 'feed.imageSizeGoogle';
-	}
-
-	public function mappingNote(): ?string
-	{
-		return 'mapping.identifierExistsNotice';
-	}
-
-	public function finalizeItem(array $item): array
-	{
-		return $this->withIdentifierExists($item);
-	}
-
 	/**
 	 * `brand`, `gtin` and `mpn` are not required: Google's spec says to omit them and send
 	 * `identifier_exists: no` when a product has none.
@@ -84,17 +67,6 @@ class GoogleFeed extends GoogleFormatFeed
 	 */
 	protected function defineAttributes(): array
 	{
-		return [
-			...$this->standardAttributes(required: [
-				'id' => true,
-				'title' => true,
-				'description' => true,
-				'link' => true,
-				'image_link' => true,
-				'availability' => true,
-				'price' => true,
-			]),
-			$this->identifierExistsDefinition(),
-		];
+		return $this->standardAttributes();
 	}
 }

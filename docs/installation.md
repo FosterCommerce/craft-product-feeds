@@ -6,7 +6,7 @@ Requirements, install, plugin settings, and scheduling the build.
 
 - Craft CMS `^5.2.0`
 - Craft Commerce `^5.5.0`
-- PHP `^8.2` with the `zlib` and `xmlwriter` extensions
+- PHP `^8.2` with the `json`, `zlib`, and `xmlwriter` extensions
 
 ## Install
 
@@ -24,6 +24,8 @@ composer require fostercommerce/product-feeds
 - **Build timeout**: seconds a build may run. Default: `3600`. It sets the queue job's TTR, and it is also how long a build may sit unfinished before the next `feeds/build` treats the feed as stalled and queues it again.
 - **Build interval**: seconds a feed may go without rebuilding. Default: `3600`. The scheduled command rebuilds a feed once it is older than this.
 - **Rebuild when products change**: rebuilds a feed as soon as a product in it is edited or deleted, without waiting for the next scheduled build. Editing several products in a row rebuilds the feed once. On by default. Stock levels are the exception, see below.
+
+Any of these can be set per environment in `config/product-feeds.php`, keyed by the property name: `fsHandle`, `batchSize`, `buildTimeout`, `buildInterval`, and `rebuildOnChange`.
 
 ## Console commands
 

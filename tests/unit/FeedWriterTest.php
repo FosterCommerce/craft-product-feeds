@@ -4,32 +4,16 @@ declare(strict_types=1);
 
 namespace fostercommerce\productfeeds\tests\unit;
 
+use fostercommerce\productfeeds\feeds\FeedSpec;
 use fostercommerce\productfeeds\feeds\GoogleFeed;
-use fostercommerce\productfeeds\feeds\RssFeedWriter;
-use fostercommerce\productfeeds\helpers\Gzip;
-use PHPUnit\Framework\TestCase;
 
-class FeedWriterTest extends TestCase
+class FeedWriterTest extends WriterTestCase
 {
 	/**
 	 * Every platform's document declares Google's namespace. Spelled out rather than read off the spec,
 	 * so a typo in the spec fails here.
 	 */
 	private const GOOGLE_NAMESPACE_URI = 'http://base.google.com/ns/1.0';
-
-	private string $path;
-
-	protected function setUp(): void
-	{
-		$this->path = tempnam(sys_get_temp_dir(), 'feed') . '.xml.gz';
-	}
-
-	protected function tearDown(): void
-	{
-		if (is_file($this->path)) {
-			unlink($this->path);
-		}
-	}
 
 	public function testWritesNamespacedRssThatRoundTrips(): void
 	{
@@ -84,73 +68,55 @@ class FeedWriterTest extends TestCase
 		$this->assertNotFalse(simplexml_load_string($inflated));
 	}
 
-	public function testUncompressedSizeMatchesTheInflatedLength(): void
-	{
-		$this->writeFeed();
-
-		$expected = strlen((string) file_get_contents('compress.zlib://' . $this->path));
-
-		$this->assertSame($expected, Gzip::uncompressedSize($this->path));
-	}
-
 	/**
 	 * XMLWriter writes these bytes through unescaped, and libxml then refuses to parse the document.
 	 * One vertical tab in one product description would take the whole feed down.
 	 */
 	public function testIllegalXmlCharactersAreStripped(): void
 	{
-		$feedWriter = (new GoogleFeed())->writer($this->path, 'Feed', 'https://example.test');
-		$feedWriter->open();
-		$feedWriter->writeItem([
-			'id' => 'SKU-1',
-			'description' => "Roman shade\x0Bwith\x0Ccontrol\x08system",
-		]);
-		$feedWriter->close();
+		$description = $this->writtenDescription("Roman shade\x0Bwith\x0Ccontrol\x08system");
 
-		$xml = (string) file_get_contents('compress.zlib://' . $this->path);
-
-		$this->assertStringNotContainsString("\x0B", $xml);
-		$this->assertNotFalse(simplexml_load_string($xml));
-
-		$document = simplexml_load_string($xml);
-		$this->assertNotFalse($document);
-		$google = $document->channel->item[0]->children(self::GOOGLE_NAMESPACE_URI);
-		$this->assertSame('Roman shadewithcontrolsystem', (string) $google->description);
+		$this->assertSame('Roman shadewithcontrolsystem', $description);
 	}
 
 	public function testTabsAndNewlinesSurvive(): void
 	{
-		$this->assertSame("a\tb\nc", RssFeedWriter::clean("a\tb\nc"));
+		$this->assertSame("a\tb\nc", $this->writtenDescription("a\tb\nc"));
 	}
 
 	/**
-	 * `preg_replace` returns null on malformed UTF-8. Without the scrub fallback the value would be
-	 * cast to an empty string, silently dropping a product's description instead of its bad byte.
+	 * `preg_replace` returns null on malformed UTF-8. Without the scrub fallback the value would be cast
+	 * to an empty string, silently dropping a product's description instead of its bad byte.
 	 */
 	public function testMalformedUtf8IsScrubbedRatherThanEmptied(): void
 	{
-		$cleaned = RssFeedWriter::clean("ok\xC3\x28");
+		$description = $this->writtenDescription("ok\xC3\x28");
 
-		$this->assertNotSame('', $cleaned);
-		$this->assertStringStartsWith('ok', $cleaned);
-		$this->assertTrue(mb_check_encoding($cleaned, 'UTF-8'));
+		$this->assertNotSame('', $description);
+		$this->assertStringStartsWith('ok', $description);
+		$this->assertTrue(mb_check_encoding($description, 'UTF-8'));
 	}
 
-	public function testAbortRemovesThePartialFile(): void
+	protected function spec(): FeedSpec
 	{
-		$feedWriter = (new GoogleFeed())->writer($this->path, 'Feed', 'https://example.test');
-		$feedWriter->open();
-		$feedWriter->writeItem([
+		return new GoogleFeed();
+	}
+
+	protected function extension(): string
+	{
+		return 'xml';
+	}
+
+	protected function anItem(): array
+	{
+		return [
 			'id' => 'SKU-1',
-		]);
-		$feedWriter->abort();
-
-		$this->assertFileDoesNotExist($this->path);
+		];
 	}
 
-	private function writeFeed(): void
+	protected function writeFeed(): void
 	{
-		$feedWriter = (new GoogleFeed())->writer($this->path, 'Test feed', 'https://example.test');
+		$feedWriter = $this->writer();
 		$feedWriter->open();
 		$feedWriter->writeItem([
 			'id' => 'SKU-1',
@@ -163,5 +129,24 @@ class FeedWriterTest extends TestCase
 			'title' => 'Another shade & co',
 		]);
 		$feedWriter->close();
+	}
+
+	/**
+	 * The description as the document carries it, once the writer has cleaned the value on its way in.
+	 */
+	private function writtenDescription(string $description): string
+	{
+		$feedWriter = $this->writer();
+		$feedWriter->open();
+		$feedWriter->writeItem([
+			'id' => 'SKU-1',
+			'description' => $description,
+		]);
+		$feedWriter->close();
+
+		$document = simplexml_load_string((string) file_get_contents('compress.zlib://' . $this->path));
+		$this->assertNotFalse($document);
+
+		return (string) $document->channel->item[0]->children(self::GOOGLE_NAMESPACE_URI)->description;
 	}
 }

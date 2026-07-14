@@ -16,6 +16,7 @@ use craft\web\UrlManager;
 use fostercommerce\productfeeds\models\Feed;
 use fostercommerce\productfeeds\models\Settings;
 use fostercommerce\productfeeds\services\AutoRebuild;
+use fostercommerce\productfeeds\services\BuildQueue;
 use fostercommerce\productfeeds\services\Builds;
 use fostercommerce\productfeeds\services\Feeds;
 use Twig\Error\LoaderError;
@@ -26,9 +27,6 @@ use yii\base\Exception;
 use yii\base\InvalidConfigException;
 
 /**
- * @property-read Feeds $feeds
- * @property-read Builds $builds
- * @property-read AutoRebuild $autoRebuild
  * @method Settings getSettings()
  */
 class ProductFeeds extends BasePlugin
@@ -50,6 +48,17 @@ class ProductFeeds extends BasePlugin
 	public bool $hasCpSettings = true;
 
 	/**
+	 * The plugin. Never null inside the plugin's own code.
+	 */
+	public static function plugin(): self
+	{
+		/** @var self $plugin */
+		$plugin = self::getInstance();
+
+		return $plugin;
+	}
+
+	/**
 	 * @return array<string, mixed>
 	 */
 	public static function config(): array
@@ -58,6 +67,7 @@ class ProductFeeds extends BasePlugin
 			'components' => [
 				'feeds' => Feeds::class,
 				'builds' => Builds::class,
+				'buildQueue' => BuildQueue::class,
 				'autoRebuild' => AutoRebuild::class,
 			],
 		];
@@ -99,6 +109,17 @@ class ProductFeeds extends BasePlugin
 		$builds = $this->get('builds');
 
 		return $builds;
+	}
+
+	/**
+	 * @throws InvalidConfigException
+	 */
+	public function getBuildQueue(): BuildQueue
+	{
+		/** @var BuildQueue $buildQueue */
+		$buildQueue = $this->get('buildQueue');
+
+		return $buildQueue;
 	}
 
 	/**
@@ -150,7 +171,7 @@ class ProductFeeds extends BasePlugin
 	 */
 	private function registerElementEvents(): void
 	{
-		// Resolved here rather than inside each handler: a closure has nowhere to declare what `get()` throws.
+		// Resolved once, so the three handlers below don't each have to deal with `get()` throwing.
 		$autoRebuild = $this->getAutoRebuild();
 
 		Event::on(

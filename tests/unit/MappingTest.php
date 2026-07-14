@@ -70,7 +70,7 @@ class MappingTest extends TestCase
 				'source' => Mapping::USE_DEFAULT,
 				'default' => 'new',
 			],
-		], Mapping::rows([
+		], Mapping::normalizeRows([
 			'title' => [
 				'source' => 'element:product.title',
 			],
@@ -86,7 +86,7 @@ class MappingTest extends TestCase
 	 */
 	public function testRowsTakeTheFirstPostedAsset(): void
 	{
-		$rows = Mapping::rows([
+		$rows = Mapping::normalizeRows([
 			'image_link' => [
 				'source' => Mapping::USE_DEFAULT,
 				'default' => ['482', '907'],
@@ -98,9 +98,9 @@ class MappingTest extends TestCase
 
 	public function testRowsDropWhatCannotBeAMappingRow(): void
 	{
-		$this->assertSame([], Mapping::rows(null));
-		$this->assertSame([], Mapping::rows('noinclude'));
-		$this->assertSame([], Mapping::rows([
+		$this->assertSame([], Mapping::normalizeRows(null));
+		$this->assertSame([], Mapping::normalizeRows('noinclude'));
+		$this->assertSame([], Mapping::normalizeRows([
 			'title' => 'element:title',
 		]));
 	}

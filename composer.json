@@ -9,6 +9,7 @@
 		"commerce",
 		"feed",
 		"google-merchant-center",
+		"klaviyo",
 		"meta",
 		"microsoft-advertising",
 		"pinterest",
@@ -41,6 +42,7 @@
 	},
 	"require": {
 		"php": "^8.2",
+		"ext-json": "*",
 		"ext-xmlwriter": "*",
 		"ext-zlib": "*",
 		"craftcms/cms": "^5.2.0",
@@ -76,6 +78,8 @@
 		"ecs:fix": "ecs check --ansi --fix --memory-limit=1G",
 		"rector:fix": "rector process --config rector.php",
 		"rector:dry-run": "rector process --dry-run --config rector.php",
+		"lint:js": "npm run lint:js",
+		"lint:js:fix": "npm run lint:js:fix",
 		"test": "phpunit --testsuite=unit",
 		"test:integration": "phpunit --testsuite=integration"
 	}

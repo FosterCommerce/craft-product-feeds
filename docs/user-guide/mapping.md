@@ -16,7 +16,7 @@ What you pick here decides which fields the mapping screen offers.
 
 Every attribute the platform defines gets a row on the **Mapping** tab, apart from the ones the plugin fills in for you. Each row asks where its value comes from:
 
-- **Don't include**: the attribute is left out. This is where most rows start.
+- **Don't include**: the attribute is left out. A required attribute has no **Don't include**; its row starts blank until you choose a source.
 - **Use default value**: the same value for every item, set in the Default value column. Right for `condition`, and for `brand` on a single-brand store. On `image_link` it is an asset picker rather than a text box.
 - **Variant properties** / **Product properties**, or **Entry properties** on an entry feed: a native value such as the SKU, the product title, or the product URL.
 - **Variant fields** and **Product fields**, or **Entry fields**: a Craft field. On a variant feed the variant's own fields and its product's fields are listed separately.
@@ -29,23 +29,25 @@ Fields are listed under the name they carry on that layout, not their global nam
 
 ## Required attributes
 
-Every platform requires `id`, `title`, `description`, `link`, `image_link`, `availability`, and `price`. A feed will not build until they are mapped or derived.
+Every shopping platform requires `id`, `title`, `description`, `link`, `image_link`, `availability`, and `price`. A feed will not build until they are mapped or derived.
 
 Meta and TikTok additionally require `brand` and `condition`. Google, Microsoft, and Pinterest require neither.
 
-On a **variant feed** the plugin derives `id`, `item_group_id`, `price`, `sale_price`, `sale_price_effective_date`, and `availability` from Commerce, so they never appear as rows. Google and Microsoft feeds derive `identifier_exists` as well. That leaves `title`, `description`, `link`, and `image_link` to map.
+A **Klaviyo feed** requires five: `id`, `title`, `description`, `link`, and `image_link`. It has no `availability`: stock reaches Klaviyo as `inventory_quantity`, a number, and `inventory_policy` says what Klaviyo does with an item once that number is zero. See [attributes](../reference/attributes.md#klaviyo).
 
-On an **entry feed** there is no Commerce variant behind the item, so `price` and `availability` are yours to map, and are required. A new entry feed starts with `availability` defaulted to `in_stock`.
+On a **variant feed** the plugin derives `id`, `item_group_id`, `price`, `sale_price`, `sale_price_effective_date`, `availability`, and `inventory_quantity` from Commerce, so they never appear as rows. Google and Microsoft feeds derive `identifier_exists` as well. That leaves `title`, `description`, `link`, and `image_link`, plus `brand` and `condition` on a Meta or TikTok feed.
+
+On an **entry feed** there is no Commerce variant behind the item, so `price` and `availability` are yours to map, and are required.
+
+A new feed arrives part-mapped: `title` and `link` point at the element's title and URL, and `condition` defaults to `new`. An entry feed also starts with `availability` defaulted to `in_stock`.
 
 ## Filtering a feed
 
 The **Filter** on the Settings tab is Craft's own condition builder, the same one you use on an element index. Add rules to narrow the feed to a subset of its source, so one product type or entry type can drive several feeds: one for a brand, one for a category, one for everything on promotion.
 
-The filter runs in the query.
-
 ## Previewing
 
-Once a feed is saved, **Preview items** at the bottom of the Mapping tab shows the first few items as the feed would carry them, and says which ones would be excluded and why. It touches neither the filesystem nor the queue, and it quotes logged-out prices.
+Once a feed is saved, **Preview items** at the bottom of the Mapping tab shows the first few items as the feed would carry them, and says which ones would be excluded and why. It quotes logged-out prices.
 
 The preview reads the feed's saved mapping, not the one on screen. Save your changes before previewing.
 

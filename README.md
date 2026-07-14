@@ -6,10 +6,9 @@ Build auto-updating **product feeds** for shopping and social platforms from Cra
 
 ## What it does
 
-- Supports Google, Meta, Microsoft, Pinterest, and TikTok, one feed per platform.
+- Supports Google, Klaviyo, Meta, Microsoft, Pinterest, and TikTok, one feed per platform.
 - Serves each feed from a stable URL. You paste it into the platform once, and the platform fetches it on a schedule.
-- Reads your Commerce variants, or your Craft entries when the thing you advertise is a page rather than a product.
-- Reads a variant's SKU, price, and stock availability from Commerce.
+- Builds from your Commerce variants, taking SKU, price, and stock availability straight from Commerce, or from your Craft entries when the thing you advertise is a page rather than a product.
 - Rebuilds a feed when someone edits a product in it, so a price change is live at the feed URL without waiting for the next scheduled build.
 - Lists the products the last build left out and why, downloadable as a CSV.
 - Previews the items a feed would contain, and checks your first image against the platform's size minimum.
@@ -19,7 +18,7 @@ Build auto-updating **product feeds** for shopping and social platforms from Cra
 
 - Craft CMS `^5.2.0`
 - Craft Commerce `^5.5.0`
-- PHP `^8.2` with the `zlib` and `xmlwriter` extensions
+- PHP `^8.2` with the `json`, `zlib`, and `xmlwriter` extensions
 
 ## Install
 
@@ -35,6 +34,8 @@ See [`docs/installation.md`](./docs/installation.md) for the full guide.
 ## Platforms
 
 A feed's platform decides which attributes it carries, how they are worded, and how large its images have to be. Google and Microsoft accept an item with no brand, GTIN, or MPN, and say so in the feed; Meta and TikTok require a brand.
+
+The five shopping platforms take the same RSS document. Klaviyo takes a JSON catalog instead, carrying stock as a number rather than an availability string, and is added in Klaviyo as a Catalog Source.
 
 See [attributes](./docs/reference/attributes.md) for what each platform sends and where each value comes from.
 

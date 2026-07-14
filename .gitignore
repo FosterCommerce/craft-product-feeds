@@ -16,3 +16,6 @@ Thumbs.db
 .fleet/
 .zed/
 /.claude/
+/CLAUDE.md
+/REVIEW.md
+/ARCHITECTURE.md

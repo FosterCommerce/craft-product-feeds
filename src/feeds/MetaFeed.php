@@ -10,35 +10,14 @@ namespace fostercommerce\productfeeds\feeds;
  */
 class MetaFeed extends GoogleFormatFeed
 {
-	/**
-	 * Meta documents every catalog field on one page.
-	 */
-	private const DOC_URL = 'https://developers.facebook.com/docs/commerce-platform/catalog/fields/';
+	protected const DOC_URL = 'https://developers.facebook.com/docs/commerce-platform/catalog/fields/';
 
 	/**
-	 * Meta's own minimum. It recommends 1024 by 1024.
+	 * Meta's minimum. It recommends 1024 by 1024.
 	 */
-	private const MINIMUM_IMAGE_SIZE = [500, 500];
+	protected const MINIMUM_IMAGE_SIZE = [500, 500];
 
-	public function docUrl(string $attribute): ?string
-	{
-		return isset($this->attributes()[$attribute]) ? self::DOC_URL : null;
-	}
-
-	public function minimumImageSize(): ?array
-	{
-		return self::MINIMUM_IMAGE_SIZE;
-	}
-
-	public function imageSizeNote(): ?string
-	{
-		return 'feed.imageSizeMeta';
-	}
-
-	public function finalizeItem(array $item): array
-	{
-		return $this->withSpacedAvailability($item);
-	}
+	protected const IMAGE_SIZE_NOTE = 'feed.imageSizeMeta';
 
 	/**
 	 * `brand` and `condition` are required here where Google treats them as conditional, because Meta
@@ -48,16 +27,6 @@ class MetaFeed extends GoogleFormatFeed
 	 */
 	protected function defineAttributes(): array
 	{
-		return $this->standardAttributes(required: [
-			'id' => true,
-			'title' => true,
-			'description' => true,
-			'link' => true,
-			'image_link' => true,
-			'availability' => true,
-			'price' => true,
-			'brand' => true,
-			'condition' => true,
-		]);
+		return $this->standardAttributes(alsoRequired: ['brand', 'condition']);
 	}
 }

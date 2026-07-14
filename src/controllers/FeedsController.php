@@ -5,11 +5,7 @@ declare(strict_types=1);
 namespace fostercommerce\productfeeds\controllers;
 
 use Craft;
-use craft\base\ElementInterface;
-use craft\elements\Asset;
-use craft\elements\conditions\ElementCondition;
 use craft\errors\FsException;
-use craft\helpers\Component;
 use craft\helpers\Cp;
 use craft\helpers\Json;
 use craft\models\Site;
@@ -21,12 +17,10 @@ use fostercommerce\productfeeds\enums\ImageEngine;
 use fostercommerce\productfeeds\enums\ImageFit;
 use fostercommerce\productfeeds\enums\Platform;
 use fostercommerce\productfeeds\enums\Source;
-use fostercommerce\productfeeds\enums\StandardAttribute;
-use fostercommerce\productfeeds\errors\FeedBuildException;
-use fostercommerce\productfeeds\feeds\FeedSpec;
-use fostercommerce\productfeeds\helpers\ImageUrl;
+use fostercommerce\productfeeds\helpers\FeedEditVariables;
+use fostercommerce\productfeeds\helpers\FeedIndexTable;
+use fostercommerce\productfeeds\helpers\FilterCondition;
 use fostercommerce\productfeeds\helpers\Mapping;
-use fostercommerce\productfeeds\helpers\MappingOptions;
 use fostercommerce\productfeeds\models\Feed;
 use fostercommerce\productfeeds\ProductFeeds;
 use fostercommerce\productfeeds\sources\FeedSource;
@@ -35,12 +29,13 @@ use Twig\Error\LoaderError;
 use Twig\Error\RuntimeError;
 use Twig\Error\SyntaxError;
 use yii\base\Exception;
+use yii\base\InvalidArgumentException;
 use yii\base\InvalidConfigException;
 use yii\web\BadRequestHttpException;
 use yii\web\ForbiddenHttpException;
-use yii\web\HttpException;
 use yii\web\MethodNotAllowedHttpException;
 use yii\web\NotFoundHttpException;
+use yii\web\RangeNotSatisfiableHttpException;
 use yii\web\Response;
 
 class FeedsController extends Controller
@@ -68,29 +63,29 @@ class FeedsController extends Controller
 	 */
 	public function actionIndex(): Response
 	{
-		$plugin = $this->plugin();
-		$feeds = $plugin->getFeeds();
-		$this->getView()->registerAssetBundle(FeedIndexAsset::class);
+		$plugin = ProductFeeds::plugin();
+		$view = $this->getView();
+		$view->registerAssetBundle(FeedIndexAsset::class);
 
 		$site = $this->requestedSite();
-		$siteFeeds = $feeds->getFeedsBySiteId((int) $site->id);
+		$siteFeeds = $plugin->getFeeds()->getFeedsBySiteId((int) $site->id);
 
-		$statusLabels = [];
-		$feedUrls = [];
+		$canEdit = Craft::$app->getUser()->checkPermission(ProductFeeds::PERMISSION_EDIT);
+		$canBuild = Craft::$app->getUser()->checkPermission(ProductFeeds::PERMISSION_BUILD);
+		$tableData = FeedIndexTable::rows($siteFeeds, $canEdit);
 
-		foreach ($siteFeeds as $siteFeed) {
-			$statusLabels[(int) $siteFeed->id] = Cp::componentStatusLabelHtml($siteFeed);
-			$feedUrls[(int) $siteFeed->id] = $feeds->getFeedUrl($siteFeed);
-		}
+		// `feed-index.js` builds the table from these.
+		$view->registerJsVar('productFeedsIndex', [
+			'tableData' => $tableData,
+			'canEdit' => $canEdit,
+			'canBuild' => $canBuild,
+		]);
 
 		return $this->renderTemplate('product-feeds/index', [
-			'feeds' => $siteFeeds,
+			'tableData' => $tableData,
 			'site' => $site,
-			'statusLabels' => $statusLabels,
-			'feedUrls' => $feedUrls,
-			'canEdit' => Craft::$app->getUser()->checkPermission(ProductFeeds::PERMISSION_EDIT),
-			'canBuild' => Craft::$app->getUser()->checkPermission(ProductFeeds::PERMISSION_BUILD),
-			'fsConfigured' => $plugin->getSettings()->fsHandle !== null,
+			'canEdit' => $canEdit,
+			'fsConfigured' => $plugin->getFeeds()->hasFs(),
 		]);
 	}
 
@@ -102,7 +97,7 @@ class FeedsController extends Controller
 	 */
 	public function actionEdit(?int $feedId = null, ?Feed $feed = null): Response
 	{
-		$plugin = $this->plugin();
+		$plugin = ProductFeeds::plugin();
 		$this->getView()->registerAssetBundle(FeedEditAsset::class);
 
 		$feed ??= $feedId === null
@@ -117,7 +112,12 @@ class FeedsController extends Controller
 
 		$this->requireSiteAccess($feed);
 
-		return $this->renderTemplate('product-feeds/_edit', $this->editVariables($feed));
+		// A new feed opens with its source's suggested mapping already filled in.
+		if ($feed->id === null && $feed->fieldMapping === []) {
+			$feed->fieldMapping = FeedSource::forFeed($feed)->defaultMapping();
+		}
+
+		return $this->renderTemplate('product-feeds/_edit', FeedEditVariables::forFeed($feed, $this->siteOf($feed)));
 	}
 
 	/**
@@ -135,7 +135,7 @@ class FeedsController extends Controller
 
 		$request = $this->request;
 		$feedId = $request->getBodyParam('feedId');
-		$plugin = $this->plugin();
+		$plugin = ProductFeeds::plugin();
 
 		$feed = $feedId === null
 			? new Feed([
@@ -145,17 +145,16 @@ class FeedsController extends Controller
 
 		$this->requireSiteAccess($feed);
 
+		$this->applyPostedFeed($feed);
 		$feed->name = $this->toString($request->getBodyParam('name', ''));
 		$feed->handle = $this->toString($request->getBodyParam('handle', ''));
-		$feed->platform = $this->toString($request->getBodyParam('platform', Platform::Google->value));
-		$feed->source = $this->toString($request->getBodyParam('source', Source::Variants->value));
 		$feed->enabled = (bool) $request->getBodyParam('enabled', true);
-		$feed->sourceIds = $this->toStringList($request->getBodyParam('sourceIds'));
-		$feed->fieldMapping = Mapping::rows($request->getBodyParam('fieldMapping'));
-		$feed->filterCondition = $this->postedFilterCondition($feed, $request->getBodyParam('filterCondition'));
-		$this->applyImageSettings($feed);
 
-		$withoutUrls = FeedSource::forFeed($feed)->sourcesWithoutUrls();
+		// The source is read from the post, so it can only be resolved once the fields above are applied.
+		$source = FeedSource::forFeed($feed);
+		$feed->filterCondition = FilterCondition::posted($source, $request->getBodyParam('filterCondition'));
+
+		$withoutUrls = $source->sourcesWithoutUrls();
 		if ($withoutUrls !== []) {
 			$feed->addError('sourceIds', Craft::t(ProductFeeds::HANDLE, 'error.sourcesWithoutUrls', [
 				'names' => implode(', ', $withoutUrls),
@@ -193,10 +192,10 @@ class FeedsController extends Controller
 		$this->requirePermission(ProductFeeds::PERMISSION_EDIT);
 
 		$feedId = $this->toInt($this->request->getRequiredBodyParam('id'));
-		$feed = $this->plugin()->getFeeds()->getFeedById($feedId) ?? throw new NotFoundHttpException();
+		$feed = ProductFeeds::plugin()->getFeeds()->getFeedById($feedId) ?? throw new NotFoundHttpException();
 		$this->requireSiteAccess($feed);
 
-		$this->plugin()->getFeeds()->deleteFeedById($feedId);
+		ProductFeeds::plugin()->getFeeds()->deleteFeedById($feedId);
 
 		return $this->asSuccess(Craft::t(ProductFeeds::HANDLE, 'feed.deleted'));
 	}
@@ -214,14 +213,27 @@ class FeedsController extends Controller
 		$this->requireAcceptsJson();
 		$this->requirePermission(ProductFeeds::PERMISSION_EDIT);
 
-		$ids = Json::decode($this->toString($this->request->getRequiredBodyParam('ids')));
-		$feedIds = is_array($ids) ? array_map($this->toInt(...), $ids) : [];
-
-		foreach ($feedIds as $feedId) {
-			$this->requireSiteAccess($this->plugin()->getFeeds()->getFeedById($feedId) ?? throw new NotFoundHttpException());
+		// `Json::decode()` throws on malformed JSON, and a well-formed scalar would otherwise reorder nothing
+		// and report success.
+		try {
+			$ids = Json::decode($this->toString($this->request->getRequiredBodyParam('ids')));
+		} catch (InvalidArgumentException) {
+			$ids = null;
 		}
 
-		$this->plugin()->getFeeds()->reorderFeeds($feedIds);
+		if (! is_array($ids)) {
+			throw new BadRequestHttpException(Craft::t(ProductFeeds::HANDLE, 'error.invalidValue', [
+				'param' => 'ids',
+			]));
+		}
+
+		$feedIds = array_map($this->toInt(...), $ids);
+
+		foreach ($feedIds as $feedId) {
+			$this->requireSiteAccess(ProductFeeds::plugin()->getFeeds()->getFeedById($feedId) ?? throw new NotFoundHttpException());
+		}
+
+		ProductFeeds::plugin()->getFeeds()->reorderFeeds($feedIds);
 
 		return $this->asSuccess();
 	}
@@ -240,15 +252,15 @@ class FeedsController extends Controller
 		$this->requirePermission(ProductFeeds::PERMISSION_EDIT);
 
 		$feed = $this->feedFromRequest();
-		$duplicate = $this->plugin()->getFeeds()->duplicateFeed($feed);
+		$duplicate = ProductFeeds::plugin()->getFeeds()->duplicateFeed($feed);
 
 		if (! $duplicate instanceof Feed) {
 			$this->setFailFlash(Craft::t(ProductFeeds::HANDLE, 'feed.saveFailed'));
 
-			return $this->redirect('product-feeds/' . $feed->id);
+			return $this->redirect($feed->getCpEditUrl());
 		}
 
-		return $this->redirect('product-feeds/' . $duplicate->id);
+		return $this->redirect($duplicate->getCpEditUrl());
 	}
 
 	/**
@@ -267,13 +279,13 @@ class FeedsController extends Controller
 
 		$feed = $this->feedFromRequest();
 
-		if ($this->plugin()->getFeeds()->rotateToken($feed)) {
+		if (ProductFeeds::plugin()->getFeeds()->rotateToken($feed)) {
 			$this->setSuccessFlash(Craft::t(ProductFeeds::HANDLE, 'feed.tokenRotated'));
 		} else {
 			$this->setFailFlash(Craft::t(ProductFeeds::HANDLE, 'feed.tokenRotateFailed'));
 		}
 
-		return $this->redirect('product-feeds/' . $feed->id);
+		return $this->redirect($feed->getCpEditUrl());
 	}
 
 	/**
@@ -289,10 +301,10 @@ class FeedsController extends Controller
 		$this->requirePermission(ProductFeeds::PERMISSION_BUILD);
 
 		$feed = $this->feedFromRequest();
-		$this->plugin()->getFeeds()->requestBuild((int) $feed->id);
+		ProductFeeds::plugin()->getBuildQueue()->requestBuild((int) $feed->id);
 
 		// The index button posts by ajax; the edit screen's button posts the page form.
-		return $this->asSuccess(Craft::t(ProductFeeds::HANDLE, 'feed.buildQueued'), redirect: 'product-feeds/' . $feed->id);
+		return $this->asSuccess(Craft::t(ProductFeeds::HANDLE, 'feed.buildQueued'), redirect: $feed->getCpEditUrl());
 	}
 
 	/**
@@ -310,12 +322,9 @@ class FeedsController extends Controller
 	{
 		$this->requirePostRequest();
 		$this->requireAcceptsJson();
+		$this->requirePermission(ProductFeeds::PERMISSION_EDIT);
 
-		$feed = new Feed();
-		$feed->source = $this->toString($this->request->getBodyParam('source', Source::Variants->value));
-		$feed->siteId = $this->toInt($this->request->getBodyParam('siteId'));
-		$feed->sourceIds = $this->toStringList($this->request->getBodyParam('sourceIds'));
-
+		$feed = $this->postedFeed();
 		$this->requireSiteAccess($feed);
 
 		$source = FeedSource::forFeed($feed);
@@ -324,6 +333,9 @@ class FeedsController extends Controller
 			'html' => Craft::$app->getView()->renderTemplate('product-feeds/_includes/source-ids', [
 				'feed' => $feed,
 				'selectableSourceGroups' => $source->selectableSourceGroups(),
+				'sourcesWithoutUrls' => $source->sourcesWithoutUrls(),
+				// Only someone who may edit can reach this action.
+				'readOnly' => false,
 			], View::TEMPLATE_MODE_CP),
 		]);
 	}
@@ -348,19 +360,12 @@ class FeedsController extends Controller
 
 		$feed = $this->feedFromRequest();
 
-		$spec = FeedSpec::forPlatform($feed->getPlatform());
-
 		return $this->asJson([
-			'html' => Craft::$app->getView()->renderTemplate('product-feeds/_includes/preview', [
-				'rows' => $this->plugin()->getBuilds()->preview($feed),
-				'attributeNames' => array_map($spec->documentName(...), array_keys($spec->attributes())),
-				'imageAttributes' => array_map(
-					$spec->documentName(...),
-					array_values(array_filter([$spec->imageAttribute(), $spec->galleryAttribute()]))
-				),
-				'idAttribute' => $spec->documentName(StandardAttribute::Id->value),
-				'platformLabel' => $feed->getPlatform()->label(),
-			], View::TEMPLATE_MODE_CP),
+			'html' => Craft::$app->getView()->renderTemplate(
+				'product-feeds/_includes/preview',
+				FeedEditVariables::forPreview($feed),
+				View::TEMPLATE_MODE_CP
+			),
 		]);
 	}
 
@@ -368,39 +373,30 @@ class FeedsController extends Controller
 	 * @throws BadRequestHttpException
 	 * @throws ForbiddenHttpException
 	 * @throws FsException
-	 * @throws HttpException
 	 * @throws InvalidConfigException
 	 * @throws NotFoundHttpException
+	 * @throws RangeNotSatisfiableHttpException
 	 */
 	public function actionExcludedCsv(): Response
 	{
-		$feed = $this->plugin()->getFeeds()->getFeedById($this->toInt($this->request->getRequiredParam('feedId')))
+		$feed = ProductFeeds::plugin()->getFeeds()->getFeedById($this->toInt($this->request->getRequiredParam('feedId')))
 			?? throw new NotFoundHttpException();
 		$this->requireSiteAccess($feed);
 
-		try {
-			$fs = $this->plugin()->getFeeds()->getFs();
-		} catch (FeedBuildException) {
-			throw new NotFoundHttpException();
-		}
+		$filesystem = ProductFeeds::plugin()->getFeeds()->findFs() ?? throw new NotFoundHttpException();
 
 		$path = $feed->getExcludedReportPath();
 
-		if (! $fs->fileExists($path)) {
+		if (! $filesystem->fileExists($path)) {
 			throw new NotFoundHttpException();
 		}
 
-		$stream = $fs->getFileStream($path);
-		$content = stream_get_contents($stream);
-		if (is_resource($stream)) {
-			fclose($stream);
-		}
-
-		return $this->response->sendContentAsFile(
-			$content === false ? '' : $content,
+		return $this->response->sendStreamAsFile(
+			$filesystem->getFileStream($path),
 			sprintf('%s-excluded.csv', $feed->handle),
 			[
 				'mimeType' => 'text/csv',
+				'fileSize' => $filesystem->getFileSize($path),
 			]
 		);
 	}
@@ -418,14 +414,18 @@ class FeedsController extends Controller
 		$this->requireAcceptsJson();
 		$this->requirePermission(ProductFeeds::PERMISSION_BUILD);
 
-		$feed = new Feed();
-		$feed->siteId = $this->toInt($this->request->getBodyParam('siteId'));
-		$feed->platform = $this->toString($this->request->getBodyParam('platform', Platform::Google->value));
-		$feed->source = $this->toString($this->request->getBodyParam('source', Source::Variants->value));
-		$feed->sourceIds = $this->toStringList($this->request->getBodyParam('sourceIds'));
-		$feed->fieldMapping = Mapping::rows($this->request->getBodyParam('fieldMapping'));
-		$this->applyImageSettings($feed);
+		$feed = $this->postedFeed();
 		$this->requireSiteAccess($feed);
+
+		// The edit form does not post the filter, and the test resolves its image from the first element the
+		// source returns. Without the saved feed's filter that is the first element in the catalog, which the
+		// feed may not publish at all.
+		$feedId = $this->toInt($this->request->getBodyParam('feedId'));
+		if ($feedId !== 0) {
+			$saved = ProductFeeds::plugin()->getFeeds()->getFeedById($feedId) ?? throw new NotFoundHttpException();
+			$this->requireSiteAccess($saved);
+			$feed->filterCondition = $saved->filterCondition;
+		}
 
 		// The feed is never saved, so nothing else validates what this resolves an image URL from and then
 		// fetches server-side.
@@ -433,73 +433,34 @@ class FeedsController extends Controller
 			throw new BadRequestHttpException(implode(' ', $feed->getFirstErrors()));
 		}
 
-		return $this->asJson($this->plugin()->getBuilds()->testImage($feed));
+		return $this->asJson(ProductFeeds::plugin()->getBuilds()->testImage($feed)->toArray());
 	}
 
 	/**
-	 * The template reads everything the platform decides straight off `spec`, so only what it cannot
-	 * reach from there is passed.
-	 *
-	 * @return array<string, mixed>
-	 * @throws Exception
-	 * @throws InvalidConfigException
-	 * @throws NotFoundHttpException
+	 * An unsaved feed carrying what the edit screen currently has on it.
 	 */
-	private function editVariables(Feed $feed): array
+	private function postedFeed(): Feed
 	{
-		$plugin = $this->plugin();
-		$spec = FeedSpec::forPlatform($feed->getPlatform());
-		$source = $feed->siteId === null ? null : FeedSource::forFeed($feed);
+		$feed = new Feed();
+		$feed->siteId = $this->toInt($this->request->getBodyParam('siteId'));
+		$this->applyPostedFeed($feed);
 
-		if ($feed->id === null && $source instanceof FeedSource && $feed->fieldMapping === []) {
-			$feed->fieldMapping = $source->defaultMapping();
-		}
-
-		return [
-			'feed' => $feed,
-			'site' => $this->siteOf($feed),
-			'spec' => $spec,
-			'computedAttributes' => $source?->computedAttributes() ?? [],
-			'mappingOptions' => $source instanceof FeedSource ? MappingOptions::forSource($source, $spec) : [],
-			'unmappedRequired' => $source instanceof FeedSource ? $plugin->getBuilds()->unmappedRequiredAttributes($feed, $spec, $source) : [],
-			'sourcesWithoutUrls' => $source?->sourcesWithoutUrls() ?? [],
-			'selectableSourceGroups' => $source?->selectableSourceGroups() ?? [],
-			'feedUrl' => $feed->id === null ? null : $plugin->getFeeds()->getFeedUrl($feed),
-			'excludedProducts' => $this->excludedProducts($feed),
-			'defaultImage' => $this->defaultImage($feed, $spec),
-			'filterCondition' => $this->filterBuilder($feed, $source),
-			'platformOptions' => $this->enumOptions(Platform::cases()),
-			'sourceOptions' => $this->enumOptions(Source::cases()),
-			'imageFitOptions' => $this->enumOptions(ImageFit::cases()),
-			'imageEngineOptions' => ImageUrl::engineOptions(),
-			'craftTransformOptions' => ImageUrl::craftTransformOptions(),
-			'noInclude' => Mapping::NO_INCLUDE,
-			'imageOverflow' => Mapping::IMAGE_OVERFLOW,
-			'canEdit' => Craft::$app->getUser()->checkPermission(ProductFeeds::PERMISSION_EDIT),
-			'canBuild' => Craft::$app->getUser()->checkPermission(ProductFeeds::PERMISSION_BUILD),
-		];
+		return $feed;
 	}
 
 	/**
-	 * @param list<ImageFit|Platform|Source> $cases
-	 * @return list<array{label: string, value: string}>
+	 * The fields every posted feed carries. A feed's name, handle and filter are only posted by the save
+	 * form, so `actionSave()` reads those itself.
 	 */
-	private function enumOptions(array $cases): array
-	{
-		return array_map(
-			static fn (ImageFit|Platform|Source $case): array => [
-				'label' => $case->label(),
-				'value' => $case->value,
-			],
-			$cases
-		);
-	}
-
-	private function applyImageSettings(Feed $feed): void
+	private function applyPostedFeed(Feed $feed): void
 	{
 		$request = $this->request;
 		$transform = $this->toString($request->getBodyParam('imageTransform'));
 
+		$feed->platform = $this->postedEnum('platform', Platform::values(), Platform::Google->value);
+		$feed->source = $this->postedEnum('source', Source::values(), Source::Variants->value);
+		$feed->sourceIds = $this->toStringList($request->getBodyParam('sourceIds'));
+		$feed->fieldMapping = Mapping::normalizeRows($request->getBodyParam('fieldMapping'));
 		$feed->imageEngine = $this->toString($request->getBodyParam('imageEngine', ImageEngine::None->value));
 		$feed->imageTransform = $transform === '' ? null : $transform;
 		$feed->imageWidth = $this->toPositiveInt($request->getBodyParam('imageWidth'));
@@ -516,93 +477,10 @@ class FeedsController extends Controller
 	private function feedFromRequest(): Feed
 	{
 		$feedId = $this->toInt($this->request->getRequiredBodyParam('feedId'));
-		$feed = $this->plugin()->getFeeds()->getFeedById($feedId) ?? throw new NotFoundHttpException();
+		$feed = ProductFeeds::plugin()->getFeeds()->getFeedById($feedId) ?? throw new NotFoundHttpException();
 		$this->requireSiteAccess($feed);
 
 		return $feed;
-	}
-
-	private function defaultImage(Feed $feed, FeedSpec $spec): ?Asset
-	{
-		$imageAttribute = $spec->imageAttribute();
-		$assetId = $imageAttribute === null
-			? ''
-			: ($feed->fieldMapping[$imageAttribute]['default'] ?? '');
-
-		return is_numeric($assetId)
-			? Craft::$app->getAssets()->getAssetById((int) $assetId)
-			: null;
-	}
-
-	/**
-	 * A capped sample of what the last build skipped, not the whole set. `actionExcludedCsv()` serves the
-	 * full list.
-	 *
-	 * @return list<array{element: ElementInterface, reason: string}>
-	 */
-	private function excludedProducts(Feed $feed): array
-	{
-		if ($feed->siteId === null) {
-			return [];
-		}
-
-		$elementType = FeedSource::forFeed($feed)->elementType();
-		$elements = Craft::$app->getElements();
-		$resolved = [];
-
-		foreach ($feed->lastBuildDiagnostics->sampleSkipped as $skipped) {
-			$element = $elements->getElementById($skipped['id'], $elementType, $feed->siteId);
-			if ($element instanceof ElementInterface) {
-				$resolved[] = [
-					'element' => $element,
-					'reason' => $skipped['reason'],
-				];
-			}
-		}
-
-		return $resolved;
-	}
-
-	private function filterBuilder(Feed $feed, ?FeedSource $source): ?ElementCondition
-	{
-		if (! $source instanceof FeedSource) {
-			return null;
-		}
-
-		$condition = $this->elementCondition($source->conditionElementType(), $feed->filterCondition);
-		$condition->mainTag = 'div';
-		$condition->name = 'filterCondition';
-		$condition->addRuleLabel = Craft::t(ProductFeeds::HANDLE, 'filter.addRule');
-
-		return $condition;
-	}
-
-	/**
-	 * @return array<string, mixed>
-	 */
-	private function postedFilterCondition(Feed $feed, mixed $posted): array
-	{
-		$rules = is_array($posted) ? ($posted['conditionRules'] ?? []) : [];
-
-		return $this->elementCondition(
-			FeedSource::forFeed($feed)->elementType(),
-			[
-				'conditionRules' => is_array($rules) ? $rules : [],
-			],
-		)->getConfig();
-	}
-
-	/**
-	 * @param class-string<ElementInterface> $elementType
-	 * @param array<string, mixed> $config
-	 */
-	private function elementCondition(string $elementType, array $config): ElementCondition
-	{
-		// Stored config carries `class` from getConfig(), and the builder posts a `config` input.
-		// Neither is a settable property on ElementCondition, so passing them through would throw.
-		unset($config['class'], $config['config']);
-
-		return new ElementCondition($elementType, Component::cleanseConfig($config));
 	}
 
 	/**
@@ -642,6 +520,26 @@ class FeedsController extends Controller
 		return is_scalar($value) ? (string) $value : '';
 	}
 
+	/**
+	 * The platform and the source are resolved through enums that throw, and both are read before the feed
+	 * is validated, so a value off the vocabulary has to be rejected as it is read.
+	 *
+	 * @param list<string> $range
+	 * @throws BadRequestHttpException
+	 */
+	private function postedEnum(string $param, array $range, string $default): string
+	{
+		$value = $this->toString($this->request->getBodyParam($param, $default));
+
+		if (! in_array($value, $range, true)) {
+			throw new BadRequestHttpException(Craft::t(ProductFeeds::HANDLE, 'error.invalidValue', [
+				'param' => $param,
+			]));
+		}
+
+		return $value;
+	}
+
 	private function toInt(mixed $value): int
 	{
 		return is_numeric($value) ? (int) $value : 0;
@@ -662,13 +560,5 @@ class FeedsController extends Controller
 		}
 
 		return array_values(array_filter(array_map($this->toString(...), $value)));
-	}
-
-	private function plugin(): ProductFeeds
-	{
-		/** @var ProductFeeds $plugin */
-		$plugin = ProductFeeds::getInstance();
-
-		return $plugin;
 	}
 }

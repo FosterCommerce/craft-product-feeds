@@ -51,7 +51,7 @@
 {% endblock %}
 
 {% block content %}
-	{% if feeds|length %}
+	{% if tableData|length %}
 		<div id="feeds-vue-admin-table"></div>
 	{% else %}
 		<p class="zilch">{{ 'index.noFeeds'|t('product-feeds') }}</p>
@@ -59,98 +59,3 @@
 
 	{% include 'product-feeds/_includes/plugin-footer' %}
 {% endblock %}
-
-{% if feeds|length %}
-{% set tableData = [] %}
-{# Every column but `title` is rendered through v-html, so those are escaped here. The title slot
-   interpolates instead, and Vue escapes it. #}
-{% for feed in feeds %}
-	{% set status = feed.getLastBuildStatus() %}
-	{% set tableData = tableData|merge([{
-		id: feed.id,
-		title: feed.name,
-		url: url('product-feeds/' ~ feed.id),
-		feedStatus: statusLabels[feed.id],
-		platform: feed.getPlatform().label()|e,
-		source: feed.getSource().label()|e,
-		lastBuilt: {
-			label: status.label()|e,
-			at: feed.lastBuildFinishedAt ? feed.lastBuildFinishedAt|datetime('short') : null,
-			error: feed.lastBuildError|e,
-		},
-		items: feed.lastBuildItemCount ?? '',
-		issues: feed.lastBuildSkippedCount ?? 0,
-		size: feed.lastBuildBytes ? feed.lastBuildBytes|filesize : '',
-		build: canBuild ? feed.id : null,
-		feedUrl: feedUrls[feed.id],
-		_showDelete: canEdit,
-	}]) %}
-{% endfor %}
-
-{% js %}
-	const columns = [
-		{ name: '__slot:title', title: Craft.t('product-feeds', 'index.nameColumn') },
-		{ name: 'feedStatus', title: Craft.t('product-feeds', 'index.statusColumn') },
-		{ name: 'platform', title: Craft.t('product-feeds', 'index.platformColumn') },
-		{ name: 'source', title: Craft.t('product-feeds', 'index.sourceColumn') },
-		{
-			name: 'lastBuilt',
-			title: Craft.t('product-feeds', 'index.lastBuiltColumn'),
-			callback: function (value) {
-				if (value.error) {
-					return '<span class="error">' + value.error + '</span>';
-				}
-
-				return value.at ? value.label + ' <span class="light">' + value.at + '</span>' : value.label;
-			}
-		},
-		{ name: 'items', title: Craft.t('product-feeds', 'index.itemsColumn') },
-		{
-			name: 'issues',
-			title: Craft.t('product-feeds', 'index.issuesColumn'),
-			callback: function (value) {
-				return value
-					? '<span class="status pending"></span> '
-						+ Craft.t('product-feeds', 'index.excludedCount', { n: value })
-					: '';
-			}
-		},
-		{ name: 'size', title: Craft.t('product-feeds', 'index.sizeColumn') },
-		{
-			name: 'feedUrl',
-			title: Craft.t('product-feeds', 'index.urlColumn'),
-			callback: function (value) {
-				return value ? '<a href="' + value + '" target="_blank" rel="noopener">' + Craft.t('product-feeds', 'index.openFeed') + '</a>' : '';
-			}
-		},
-		{
-			name: 'build',
-			title: '',
-			callback: function (feedId) {
-				if (feedId === null) {
-					return '';
-				}
-
-				return '<button type="button" class="btn small pf-build-feed" data-feed-id="' + feedId + '">'
-					+ Craft.t('product-feeds', 'index.buildButton') + '</button>';
-			}
-		},
-	];
-
-	const config = {
-		columns: columns,
-		container: '#feeds-vue-admin-table',
-		fullPane: false,
-		tableData: {{ tableData|json_encode|raw }},
-	};
-
-	{% if canEdit %}
-		config['deleteAction'] = 'product-feeds/feeds/delete';
-		config['reorderAction'] = 'product-feeds/feeds/reorder';
-		config['reorderSuccessMessage'] = Craft.t('product-feeds', 'index.reordered');
-		config['reorderFailMessage'] = Craft.t('product-feeds', 'index.reorderFailed');
-	{% endif %}
-
-	new Craft.VueAdminTable(config);
-{% endjs %}
-{% endif %}

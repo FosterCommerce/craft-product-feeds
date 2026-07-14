@@ -2,8 +2,6 @@
 
 Builds product feeds from Craft Commerce variants or Craft entries, and serves each one from a stable URL that a shopping platform fetches on a schedule.
 
-You create a feed, pick the platform it is for, choose which of the two sources it reads, and map each attribute the platform asks for to your Craft data. You paste the feed's URL into the platform once, and the plugin updates the dynamic data as it changes to keep the feed up-to-date.
-
 ## Where to go
 
 **Setting it up?** Start with [Installation](./installation.md), which covers the filesystem, the settings, and scheduling the build.

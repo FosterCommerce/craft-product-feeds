@@ -9,6 +9,8 @@ use fostercommerce\productfeeds\ProductFeeds;
 
 enum Source: string
 {
+	use EnumValuesTrait;
+
 	case Variants = 'variants';
 
 	case Entries = 'entries';

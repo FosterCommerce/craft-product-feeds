@@ -29,7 +29,7 @@ class Install extends Migration
 			'source' => $this->string(16)->notNull(),
 			'siteId' => $this->integer()->notNull(),
 			'sourceIds' => $this->text(),
-			// Feed Me shipped this as TEXT and had to migrate; 64KB is not enough headroom.
+			// A mapping row per attribute, each with its own default value, can outgrow TEXT's 64KB.
 			'fieldMapping' => $this->mediumText(),
 			'imageEngine' => $this->string()->notNull()->defaultValue(ImageEngine::None->value),
 			'imageTransform' => $this->string(),
@@ -61,8 +61,6 @@ class Install extends Migration
 		// The public route resolves a feed by token alone, on every fetch.
 		$this->createIndex(null, Table::FEEDS, ['token'], true);
 		$this->createIndex(null, Table::FEEDS, ['siteId'], false);
-		// The scheduler enqueues every enabled feed.
-		$this->createIndex(null, Table::FEEDS, ['enabled'], false);
 
 		$this->addForeignKey(null, Table::FEEDS, ['siteId'], CraftTable::SITES, ['id'], 'CASCADE', 'CASCADE');
 

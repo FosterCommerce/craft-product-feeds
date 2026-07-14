@@ -13,7 +13,9 @@ use craft\models\FieldLayout;
 use fostercommerce\productfeeds\enums\AttributeKind;
 use fostercommerce\productfeeds\enums\Source;
 use fostercommerce\productfeeds\feeds\AttributeDefinition;
+use fostercommerce\productfeeds\feeds\FeedSpec;
 use fostercommerce\productfeeds\helpers\FeedValue;
+use fostercommerce\productfeeds\helpers\FilterCondition;
 use fostercommerce\productfeeds\helpers\Mapping;
 use fostercommerce\productfeeds\models\Feed;
 use fostercommerce\productfeeds\models\ImageTransform;
@@ -38,8 +40,6 @@ abstract class FeedSource
 	public function __construct(
 		protected readonly Feed $feed,
 	) {
-		// A source is built fresh for each build, preview and image test, so what it memoizes cannot
-		// outlive the pass that filled it.
 		$this->feedValue = new FeedValue();
 	}
 
@@ -62,6 +62,22 @@ abstract class FeedSource
 	 * @return string[]
 	 */
 	abstract public function computedAttributes(): array;
+
+	/**
+	 * The attributes the admin maps.
+	 *
+	 * @return array<string, AttributeDefinition> keyed by attribute handle
+	 */
+	public function mappableAttributes(FeedSpec $spec): array
+	{
+		$pluginProvided = [...$this->computedAttributes(), ...$spec->derivedAttributes()];
+
+		return array_filter(
+			$spec->attributes(),
+			static fn (string $name): bool => ! in_array($name, $pluginProvided, true),
+			ARRAY_FILTER_USE_KEY
+		);
+	}
 
 	/**
 	 * @return string|list<string>|null
@@ -90,26 +106,8 @@ abstract class FeedSource
 	abstract public function elementPaths(): array;
 
 	/**
-	 * The sources this feed can't produce items for, e.g. a product type with no public URL. A
-	 * non-empty list blocks the feed from saving.
-	 *
-	 * @return array<int, string> names of the offending product types or sections
-	 * @throws InvalidConfigException
-	 */
-	abstract public function sourcesWithoutUrls(): array;
-
-	/**
-	 * Every source key the admin may choose. Only those whose items have a public URL on this feed's
+	 * The source keys the admin may choose. Only the ones whose items have a public URL on this feed's
 	 * site: an item needs a landing page for Google to crawl.
-	 *
-	 * @return list<string>
-	 * @throws InvalidConfigException
-	 */
-	abstract public function selectableSourceIds(): array;
-
-	/**
-	 * The same keys, as the picker shows them. A heading groups the keys under the thing they belong
-	 * to, and is empty where the source has nothing to group by.
 	 *
 	 * @return list<array{heading: string, options: list<array{value: string, label: string}>}>
 	 * @throws InvalidConfigException
@@ -117,15 +115,57 @@ abstract class FeedSource
 	abstract public function selectableSourceGroups(): array;
 
 	/**
+	 * The same keys, flat.
+	 *
+	 * @return list<string>
+	 * @throws InvalidConfigException
+	 */
+	public function selectableSourceIds(): array
+	{
+		$sourceIds = [];
+
+		foreach ($this->selectableSourceGroups() as $group) {
+			foreach ($group['options'] as $option) {
+				$sourceIds[] = $option['value'];
+			}
+		}
+
+		return $sourceIds;
+	}
+
+	/**
+	 * The picked sources this feed can't produce items for. A non-empty list blocks the feed from saving.
+	 *
+	 * @return list<string> names of the offending product types or sections
+	 * @throws InvalidConfigException
+	 */
+	public function sourcesWithoutUrls(): array
+	{
+		if ($this->feed->sourceIds === []) {
+			return [];
+		}
+
+		$withUrls = $this->selectableSourceIds();
+		$names = [];
+
+		foreach ($this->feed->sourceIds as $sourceId) {
+			if (! in_array($sourceId, $withUrls, true)) {
+				$names[] = $this->sourceName($sourceId);
+			}
+		}
+
+		return array_values(array_unique(array_filter($names)));
+	}
+
+	/**
 	 * @return class-string<ElementInterface>
 	 */
 	abstract public function elementType(): string;
 
 	/**
-	 * Whether a saved or deleted element is one this source could feed. Checked before any query, to
-	 * skip unrelated element types.
+	 * Whether the element is of a type this source feeds at all.
 	 */
-	abstract public function reads(ElementInterface $element): bool;
+	abstract public function handles(ElementInterface $element): bool;
 
 	/**
 	 * Whether the element belongs to this feed's set, filter included, ignoring enabled status so a
@@ -133,16 +173,16 @@ abstract class FeedSource
 	 *
 	 * @throws InvalidConfigException
 	 */
-	abstract public function inScope(ElementInterface $element): bool;
+	abstract public function contains(ElementInterface $element): bool;
 
 	/**
-	 * A coarse membership test from the element's in-memory type or section, for a deleted element that
-	 * an element query no longer returns once it is trashed, so `inScope` cannot test it. The filter is
-	 * not applied, so deleting a filtered-out member still rebuilds.
+	 * Whether a deleted element probably belonged to this feed, judged from the element in memory: a
+	 * trashed element no longer comes back from a query, so `contains()` cannot test it. The filter is not
+	 * applied, so deleting a filtered-out member still rebuilds.
 	 *
 	 * @throws InvalidConfigException
 	 */
-	abstract public function mightRead(ElementInterface $element): bool;
+	abstract public function mightContain(ElementInterface $element): bool;
 
 	/**
 	 * The element the filter condition is built against. Variant fields live on the product, so a
@@ -153,8 +193,7 @@ abstract class FeedSource
 	abstract public function conditionElementType(): string;
 
 	/**
-	 * One excluded product as a CSV row. `cpUrl` is the element's edit screen: a variant has none of
-	 * its own, so it points at the product that owns it.
+	 * One excluded item as a CSV row.
 	 *
 	 * @return array{id: string, title: string, cpUrl: string, issue: string}
 	 */
@@ -174,12 +213,11 @@ abstract class FeedSource
 	}
 
 	/**
+	 * The mapping a new feed starts with.
+	 *
 	 * @return array<string, array{source: string, default: string}>
 	 */
-	public function defaultMapping(): array
-	{
-		return [];
-	}
+	abstract public function defaultMapping(): array;
 
 	/**
 	 * Called once per batch so a source can bulk-load anything the element query won't carry.
@@ -191,17 +229,16 @@ abstract class FeedSource
 	}
 
 	/**
+	 * @param array{kind: string, value: string} $mapping parsed by `Mapping::parse()`
 	 * @return list<string>
 	 * @throws InvalidConfigException
 	 */
-	public function resolve(ElementInterface $element, string $source, AttributeDefinition $attributeDefinition): array
+	public function resolve(ElementInterface $element, array $mapping, AttributeDefinition $attributeDefinition): array
 	{
-		$parsed = Mapping::parse($source);
-
-		$value = match ($parsed['kind']) {
-			Mapping::ELEMENT => $this->elementValue($element, $parsed['value']),
-			Mapping::FIELD => $this->fieldValue($element, $parsed['value']),
-			Mapping::PRODUCT_FIELD => $this->fieldValue($this->productOf($element), $parsed['value']),
+		$value = match ($mapping['kind']) {
+			Mapping::ELEMENT => $this->elementValue($element, $mapping['value']),
+			Mapping::FIELD => $this->fieldValue($element, $mapping['value']),
+			Mapping::PRODUCT_FIELD => $this->fieldValue($this->productOf($element), $mapping['value']),
 			default => null,
 		};
 
@@ -214,8 +251,7 @@ abstract class FeedSource
 	}
 
 	/**
-	 * An image default is an asset ID rather than a value, so it resolves through the feed's engine like
-	 * any other image.
+	 * An image default is an asset ID, so it resolves through the feed's engine like any other image.
 	 *
 	 * @return list<string>
 	 * @throws InvalidConfigException
@@ -234,6 +270,39 @@ abstract class FeedSource
 	}
 
 	/**
+	 * What to call a source key on screen. Null where the key no longer resolves to anything.
+	 *
+	 * @throws InvalidConfigException
+	 */
+	abstract protected function sourceName(string $sourceId): ?string;
+
+	/**
+	 * The custom fields the mapping reads, so the query loads them in one go rather than per element.
+	 *
+	 * @return list<string>
+	 */
+	protected function eagerLoadPaths(): array
+	{
+		$paths = [];
+
+		foreach ($this->feed->fieldMapping as $mapping) {
+			$parsed = Mapping::parse($mapping['source']);
+
+			$path = match ($parsed['kind']) {
+				Mapping::FIELD => $parsed['value'],
+				Mapping::PRODUCT_FIELD => 'product.' . $parsed['value'],
+				default => null,
+			};
+
+			if ($path !== null) {
+				$paths[] = $path;
+			}
+		}
+
+		return array_values(array_unique($paths));
+	}
+
+	/**
 	 * The element a `productField:` mapping reads from. Null where the concept doesn't apply.
 	 */
 	protected function productOf(ElementInterface $element): ?ElementInterface
@@ -247,10 +316,7 @@ abstract class FeedSource
 			return null;
 		}
 
-		$config = $this->feed->filterCondition;
-		unset($config['class']);
-
-		return new ElementCondition($this->conditionElementType(), $config);
+		return FilterCondition::fromConfig($this->conditionElementType(), $this->feed->filterCondition);
 	}
 
 	private function imageTransform(): ImageTransform
@@ -259,10 +325,10 @@ abstract class FeedSource
 	}
 
 	/**
-	 * Walks a dotted path such as `product.url`. A missing segment yields null, which the builder counts
-	 * as a blank rather than an error: a mapped field can be absent from some of a feed's product types.
+	 * Walks a dotted path such as `product.url`. A missing segment yields null, counted as a blank rather
+	 * than an error: a mapped field can be absent from some of a feed's product types.
 	 */
-	private function elementValue(?ElementInterface $element, string $path): mixed
+	private function elementValue(ElementInterface $element, string $path): mixed
 	{
 		$value = $element;
 

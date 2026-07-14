@@ -9,6 +9,8 @@ use fostercommerce\productfeeds\ProductFeeds;
 
 enum BuildStatus: string
 {
+	use EnumValuesTrait;
+
 	case Pending = 'pending';
 
 	case Building = 'building';

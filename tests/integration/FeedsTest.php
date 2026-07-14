@@ -5,7 +5,10 @@ declare(strict_types=1);
 namespace fostercommerce\productfeeds\tests\integration;
 
 use DateTime;
+use fostercommerce\productfeeds\enums\Availability;
 use fostercommerce\productfeeds\enums\BuildStatus;
+use fostercommerce\productfeeds\enums\Platform;
+use fostercommerce\productfeeds\helpers\Mapping;
 use fostercommerce\productfeeds\models\BuildDiagnostics;
 use fostercommerce\productfeeds\models\BuildResult;
 use fostercommerce\productfeeds\models\Feed;
@@ -21,98 +24,6 @@ class FeedsTest extends IntegrationTestCase
 		$this->assertStringContainsString($feed->handle . '-' . $feed->token, $this->feeds()->getFeedUrl($feed));
 	}
 
-	/**
-	 * Saving a product fires an element save per variant. Without the pending flag each one would queue
-	 * its own build of the same feed.
-	 */
-	public function testRequestBuildCollapsesABurstIntoOneQueuedBuild(): void
-	{
-		$feed = $this->makeFeed('pending');
-		$feedId = (int) $feed->id;
-
-		$this->assertFalse($this->feeds()->isBuildPending($feedId));
-
-		$this->feeds()->requestBuild($feedId);
-		$this->assertTrue($this->feeds()->isBuildPending($feedId));
-
-		$queuedBefore = $this->queuedBuildCount();
-		$this->feeds()->requestBuild($feedId);
-		$this->feeds()->requestBuild($feedId);
-
-		$this->assertSame($queuedBefore, $this->queuedBuildCount(), 'A pending build should absorb further requests.');
-	}
-
-	/**
-	 * The job clears the flag as soon as it stops absorbing edits. If it did not, `requestBuild()` would
-	 * no-op until the flag expired and those edits would wait for the next interval build.
-	 */
-	public function testClearPendingLetsTheNextEditQueueAgain(): void
-	{
-		$feed = $this->makeFeed('clearPending');
-		$feedId = (int) $feed->id;
-
-		$this->feeds()->requestBuild($feedId);
-		$this->feeds()->clearPending($feedId);
-
-		$this->assertFalse($this->feeds()->isBuildPending($feedId));
-
-		$queuedBefore = $this->queuedBuildCount();
-		$this->feeds()->requestBuild($feedId);
-
-		$this->assertSame($queuedBefore + 1, $this->queuedBuildCount());
-	}
-
-	/**
-	 * An edit that lands mid-build is remembered, and whoever finishes that build queues a fresh one.
-	 */
-	public function testADirtyFeedQueuesAFollowUpBuild(): void
-	{
-		$feed = $this->makeFeed('dirty');
-		$feedId = (int) $feed->id;
-
-		$queuedBefore = $this->queuedBuildCount();
-
-		$this->feeds()->requestBuildIfDirty($feedId);
-		$this->assertSame($queuedBefore, $this->queuedBuildCount(), 'A clean feed queues nothing.');
-
-		$this->feeds()->markBuildDirty($feedId);
-		$this->feeds()->requestBuildIfDirty($feedId);
-		$this->assertSame($queuedBefore + 1, $this->queuedBuildCount());
-
-		// The flag is taken, not read, so the follow-up build does not queue a third.
-		$this->feeds()->clearPending($feedId);
-		$this->feeds()->requestBuildIfDirty($feedId);
-		$this->assertSame($queuedBefore + 1, $this->queuedBuildCount());
-	}
-
-	public function testAFeedIsDueOnceItsLastBuildIsOlderThanTheInterval(): void
-	{
-		$feed = $this->makeFeed('due');
-
-		$this->assertTrue($this->feeds()->isDue($feed, 3600), 'A feed that has never built is due.');
-
-		$feed->lastBuildStatus = BuildStatus::Ok->value;
-		$feed->lastBuildFinishedAt = new DateTime('-10 minutes');
-		$this->assertFalse($this->feeds()->isDue($feed, 3600));
-		$this->assertTrue($this->feeds()->isDue($feed, 300));
-	}
-
-	/**
-	 * A worker killed mid-build never clears the status, so without the timeout the feed never rebuilds.
-	 */
-	public function testAStalledBuildBecomesDueAgainAfterTheTimeout(): void
-	{
-		$feed = $this->makeFeed('stalled');
-		$feed->lastBuildStatus = BuildStatus::Building->value;
-
-		$feed->lastBuildStartedAt = new DateTime('-1 minute');
-		$this->assertFalse($this->feeds()->isDue($feed, 3600), 'A build that just started is not stalled.');
-
-		$timeout = $this->plugin()->getSettings()->buildTimeout;
-		$feed->lastBuildStartedAt = new DateTime(sprintf('-%d seconds', $timeout + 60));
-		$this->assertTrue($this->feeds()->isDue($feed, 3600));
-	}
-
 	public function testRecordBuildStoresTheResultAndReadsItBack(): void
 	{
 		$feed = $this->makeFeed('record');
@@ -122,7 +33,7 @@ class FeedsTest extends IntegrationTestCase
 		$diagnostics->countBlank('description');
 		$diagnostics->countInvalid('price');
 		$diagnostics->countSkipped('image_link');
-		$diagnostics->sampleSkipped(4321, 'image_link');
+		$diagnostics->recordSkippedSample(4321, 'image_link');
 
 		$this->feeds()->recordBuild(
 			$feed,
@@ -208,6 +119,35 @@ class FeedsTest extends IntegrationTestCase
 	}
 
 	/**
+	 * The artifact's path derives from the token, so rotating one without moving the other leaves the new
+	 * URL serving a 404 until the next build.
+	 */
+	public function testRotateTokenMovesTheArtifactToTheNewUrl(): void
+	{
+		$feed = $this->buildableFeed('rotateArtifact', Platform::Google, [
+			'condition' => [
+				'source' => Mapping::USE_DEFAULT,
+				'default' => 'new',
+			],
+			'availability' => [
+				'source' => Mapping::USE_DEFAULT,
+				'default' => Availability::InStock->value,
+			],
+		]);
+
+		$this->buildOrSkip($feed);
+
+		$previousPath = $feed->getPath();
+		$fs = $this->feeds()->getFs();
+		$this->assertTrue($fs->fileExists($previousPath));
+
+		$this->assertTrue($this->feeds()->rotateToken($feed));
+
+		$this->assertTrue($fs->fileExists($feed->getPath()), 'The new URL serves nothing: the artifact did not move.');
+		$this->assertFalse($fs->fileExists($previousPath), 'The old artifact is still downloadable.');
+	}
+
+	/**
 	 * The artifact is deleted from a path derived from the old token, so a failed save has to leave the
 	 * stored token, and its file, alone.
 	 */
@@ -236,6 +176,45 @@ class FeedsTest extends IntegrationTestCase
 		$this->assertNotSame($feed->handle, $duplicate->handle);
 		$this->assertNotSame($feed->token, $duplicate->token);
 		$this->assertFalse($duplicate->enabled);
+	}
+
+	/**
+	 * The copy has never been built, and `saveFeed()` doesn't write the build columns, so the row comes up
+	 * at its defaults. `clone` is shallow, so the model has to be reset to match: it once carried the source
+	 * feed's numbers and shared its `BuildDiagnostics` by reference.
+	 */
+	public function testDuplicateCarriesNoneOfTheSourceFeedsBuildHistory(): void
+	{
+		$feed = $this->makeFeed('dupeHistory');
+		$feed->lastBuildDiagnostics->countSkipped('image_link');
+		$this->feeds()->recordBuild($feed, BuildStatus::Ok, new DateTime(), new BuildResult(
+			itemCount: 12,
+			bytes: 3400,
+			bytesUncompressed: 9000,
+			buildDiagnostics: $feed->lastBuildDiagnostics,
+		));
+
+		$built = $this->feeds()->getFeedById((int) $feed->id);
+		$this->assertNotNull($built);
+		$this->assertSame(12, $built->lastBuildItemCount);
+
+		$duplicate = $this->feeds()->duplicateFeed($built);
+		$this->assertNotNull($duplicate);
+
+		$this->assertSame(BuildStatus::Pending->value, $duplicate->lastBuildStatus);
+		$this->assertNull($duplicate->lastBuildItemCount);
+		$this->assertNull($duplicate->lastBuildSkippedCount);
+		$this->assertNull($duplicate->lastBuildBytes);
+		$this->assertNull($duplicate->lastBuildFinishedAt);
+		$this->assertNull($duplicate->lastBuildError);
+		$this->assertSame(0, $duplicate->lastBuildDiagnostics->skippedCount());
+
+		// The shallow clone shared one BuildDiagnostics, so counting on the copy also moved the original.
+		$this->assertNotSame($built->lastBuildDiagnostics, $duplicate->lastBuildDiagnostics);
+
+		$reloaded = $this->feeds()->getFeedById((int) $duplicate->id);
+		$this->assertNotNull($reloaded);
+		$this->assertNull($reloaded->lastBuildItemCount, 'The saved row carries no build history either.');
 	}
 
 	public function testAHandleCannotBeTakenTwice(): void

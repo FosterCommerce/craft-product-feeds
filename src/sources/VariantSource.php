@@ -29,52 +29,38 @@ use yii\base\InvalidConfigException;
 class VariantSource extends FeedSource
 {
 	/**
-	 * Availability facts, keyed by purchasable ID. `stock` has no setter on `Purchasable`, so a
-	 * selected column can't reach the element and `getStock()` would be a query per variant.
+	 * One store row per variant, keyed by purchasable ID. `stock` has no setter on `Purchasable`, so it
+	 * cannot reach the element as a selected column and `getStock()` would be a query per variant.
 	 *
 	 * @var array<int, array{stock: ?int, inventoryTracked: bool, availableForPurchase: bool}>
 	 */
-	private array $availability = [];
+	private array $variantStock = [];
 
 	/**
 	 * @throws InvalidConfigException
 	 */
 	public function query(): ElementQueryInterface
 	{
-		$query = Variant::find()
-			->siteId($this->feed->siteId)
-			->status(Element::STATUS_ENABLED)
-			// A disabled or unposted product has no landing page, and a feed item pointing at a 404
-			// is a disapproval.
-			->productStatus(Product::STATUS_LIVE)
+		return $this->baseQuery(true)
 			// Catalog pricing rules can be scoped to a customer group. Google's crawler is logged
 			// out, so the feed has to quote the logged-out price or the landing page won't match.
 			->forCustomer(false)
-			->with($this->eagerLoadPaths())
+			// `product` always: the default mapping reads its title and URL, and every `productField:`
+			// mapping hangs off it.
+			->with(['product', ...$this->eagerLoadPaths()])
 			->orderBy([
 				'elements.id' => SORT_ASC,
 			]);
-
-		$query->typeId($this->productTypeIds());
-
-		$condition = $this->filterCondition();
-		if ($condition instanceof ElementCondition) {
-			$productQuery = Product::find()->siteId($this->feed->siteId);
-			$condition->modifyQuery($productQuery);
-			$query->hasProduct($productQuery);
-		}
-
-		return $query;
 	}
 
 	public function computedAttributes(): array
 	{
-		return ['id', 'item_group_id', 'price', 'sale_price', 'sale_price_effective_date', 'availability'];
+		return ['id', 'item_group_id', 'price', 'sale_price', 'sale_price_effective_date', 'availability', 'inventory_quantity'];
 	}
 
 	public function prepareBatch(array $elements): void
 	{
-		$this->availability = [];
+		$this->variantStock = [];
 
 		$storeId = $this->feed->getStore()?->id;
 		$purchasableIds = array_values(array_filter(array_map(
@@ -86,6 +72,7 @@ class VariantSource extends FeedSource
 			return;
 		}
 
+		/** @var list<array{purchasableId: int|string, stock: int|string|null, inventoryTracked: bool|int, availableForPurchase: bool|int}> $rows */
 		$rows = (new Query())
 			->select(['purchasableId', 'stock', 'inventoryTracked', 'availableForPurchase'])
 			->from(CommerceTable::PURCHASABLES_STORES)
@@ -96,15 +83,11 @@ class VariantSource extends FeedSource
 			->all();
 
 		foreach ($rows as $row) {
-			if (! is_array($row)) {
-				continue;
-			}
-
-			$stock = $row['stock'] ?? null;
-			$this->availability[(int) $row['purchasableId']] = [
+			$stock = $row['stock'];
+			$this->variantStock[(int) $row['purchasableId']] = [
 				'stock' => is_numeric($stock) ? (int) $stock : null,
-				'inventoryTracked' => (bool) ($row['inventoryTracked'] ?? false),
-				'availableForPurchase' => (bool) ($row['availableForPurchase'] ?? false),
+				'inventoryTracked' => (bool) $row['inventoryTracked'],
+				'availableForPurchase' => (bool) $row['availableForPurchase'],
 			];
 		}
 	}
@@ -122,10 +105,11 @@ class VariantSource extends FeedSource
 		return match ($attribute) {
 			'id' => $element->getSku(),
 			'item_group_id' => (string) $element->getProductId(),
-			'price' => $this->decimalPrice($element->getPrice()),
+			'price' => $this->decimalPrice($this->publishedPrice($element)),
 			'sale_price' => $element->getOnPromotion() ? $this->decimalPrice($element->getPromotionalPrice()) : null,
 			'sale_price_effective_date' => $this->salePriceEffectiveDate($element),
 			'availability' => $this->availability($element),
+			'inventory_quantity' => $this->inventoryQuantity($element),
 			default => null,
 		};
 	}
@@ -159,7 +143,7 @@ class VariantSource extends FeedSource
 		return Product::class;
 	}
 
-	public function reads(ElementInterface $element): bool
+	public function handles(ElementInterface $element): bool
 	{
 		return $element instanceof Variant || $element instanceof Product;
 	}
@@ -167,7 +151,7 @@ class VariantSource extends FeedSource
 	/**
 	 * @throws InvalidConfigException
 	 */
-	public function mightRead(ElementInterface $element): bool
+	public function mightContain(ElementInterface $element): bool
 	{
 		$typeId = match (true) {
 			$element instanceof Product => $element->typeId,
@@ -181,9 +165,9 @@ class VariantSource extends FeedSource
 	/**
 	 * @throws InvalidConfigException
 	 */
-	public function inScope(ElementInterface $element): bool
+	public function contains(ElementInterface $element): bool
 	{
-		$query = $this->scopeQuery();
+		$query = $this->baseQuery(false);
 
 		if ($element instanceof Variant) {
 			$query->id($element->id);
@@ -198,15 +182,8 @@ class VariantSource extends FeedSource
 
 	public function reportRow(ElementInterface $element, string $issue): array
 	{
-		if (! $element instanceof Variant) {
-			return [
-				'id' => '',
-				'title' => '',
-				'cpUrl' => '',
-				'issue' => $issue,
-			];
-		}
-
+		// The report only ever lists elements this source's own query returned.
+		/** @var Variant $element */
 		$product = $element->getProduct();
 
 		return [
@@ -261,17 +238,6 @@ class VariantSource extends FeedSource
 	/**
 	 * @throws InvalidConfigException
 	 */
-	public function selectableSourceIds(): array
-	{
-		return array_map(
-			static fn (ProductType $productType): string => (string) $productType->id,
-			$this->productTypesWithUrls()
-		);
-	}
-
-	/**
-	 * @throws InvalidConfigException
-	 */
 	public function selectableSourceGroups(): array
 	{
 		$options = [];
@@ -290,27 +256,17 @@ class VariantSource extends FeedSource
 	}
 
 	/**
-	 * Only reports explicitly chosen product types. An empty choice means "everything that can
-	 * work", which `effectiveSourceIds()` already narrows to the ones with URLs.
-	 *
 	 * @throws InvalidConfigException
 	 */
-	public function sourcesWithoutUrls(): array
+	protected function sourceName(string $sourceId): ?string
 	{
-		if ($this->feed->sourceIds === []) {
-			return [];
-		}
-
-		$withUrls = $this->selectableSourceIds();
-		$names = [];
-
 		foreach ($this->productTypes() as $productType) {
-			if (! in_array((string) $productType->id, $withUrls, true)) {
-				$names[] = (string) $productType->name;
+			if ((string) $productType->id === $sourceId) {
+				return (string) $productType->name;
 			}
 		}
 
-		return $names;
+		return null;
 	}
 
 	protected function productOf(ElementInterface $element): ?ElementInterface
@@ -319,20 +275,28 @@ class VariantSource extends FeedSource
 	}
 
 	/**
+	 * Every variant this feed covers. Live only for a build: a disabled or unposted product has no landing
+	 * page, and a feed item pointing at a 404 is a disapproval.
+	 *
 	 * @return VariantQuery<int, Variant>
 	 * @throws InvalidConfigException
 	 */
-	private function scopeQuery(): VariantQuery
+	private function baseQuery(bool $liveOnly): VariantQuery
 	{
 		$query = Variant::find()
 			->siteId($this->feed->siteId)
-			->status(null)
-			->productStatus(null);
+			->status($liveOnly ? Element::STATUS_ENABLED : null)
+			->productStatus($liveOnly ? Product::STATUS_LIVE : null);
+
 		$query->typeId($this->productTypeIds());
 
 		$condition = $this->filterCondition();
 		if ($condition instanceof ElementCondition) {
-			$productQuery = Product::find()->siteId($this->feed->siteId)->status(null);
+			$productQuery = Product::find()->siteId($this->feed->siteId);
+			if (! $liveOnly) {
+				$productQuery->status(null);
+			}
+
 			$condition->modifyQuery($productQuery);
 			$query->hasProduct($productQuery);
 		}
@@ -390,42 +354,69 @@ class VariantSource extends FeedSource
 	}
 
 	/**
-	 * `product` is always eager-loaded: the default mapping reads the product's title and URL, and every
-	 * `productField:` mapping hangs off it.
+	 * A variant with no store row is treated as out of stock.
 	 *
-	 * @return string[]
+	 * @throws InvalidConfigException
 	 */
-	private function eagerLoadPaths(): array
+	private function availability(Variant $variant): string
 	{
-		$paths = ['product'];
+		$variantStock = $this->variantStock[(int) $variant->id] ?? null;
 
-		foreach ($this->feed->fieldMapping as $mapping) {
-			$parsed = Mapping::parse($mapping['source']);
-			if ($parsed['kind'] !== Mapping::FIELD && $parsed['kind'] !== Mapping::PRODUCT_FIELD) {
-				continue;
-			}
-
-			$paths[] = $parsed['kind'] === Mapping::PRODUCT_FIELD
-				? 'product.' . $parsed['value']
-				: $parsed['value'];
-		}
-
-		return array_values(array_unique($paths));
-	}
-
-	private function availability(Variant $element): string
-	{
-		$facts = $this->availability[(int) $element->id] ?? null;
-
-		if ($facts === null || ! $facts['availableForPurchase']) {
+		if ($variantStock === null || ! $variantStock['availableForPurchase']) {
 			return Availability::OutOfStock->value;
 		}
 
-		if ($facts['inventoryTracked'] && ($facts['stock'] ?? 0) < 1) {
-			return Availability::OutOfStock->value;
+		if ($variantStock['inventoryTracked'] && ($variantStock['stock'] ?? 0) < 1) {
+			return $this->allowsOutOfStockPurchases($variant)
+				? Availability::InStock->value
+				: Availability::OutOfStock->value;
 		}
 
 		return Availability::InStock->value;
+	}
+
+	/**
+	 * Commerce keeps a backordered variant buyable, so out_of_stock would suppress an item the store is
+	 * still selling. Commerce owns the rule, and an EVENT_PURCHASABLE_OUT_OF_STOCK_PURCHASES_ALLOWED
+	 * handler can change it per store, so this asks rather than reading the column.
+	 *
+	 * @throws InvalidConfigException
+	 */
+	private function allowsOutOfStockPurchases(Variant $variant): bool
+	{
+		/** @var Commerce $commerce */
+		$commerce = Commerce::getInstance();
+
+		return $commerce->getPurchasables()->isPurchasableOutOfStockPurchasingAllowed($variant);
+	}
+
+	/**
+	 * A spec with no `sale_price` attribute has nowhere else to put a promotion, so `price` carries what
+	 * the customer actually pays. Where the spec has one, `price` stays the full price and the promotion
+	 * goes to `sale_price`.
+	 *
+	 * @throws InvalidConfigException
+	 */
+	private function publishedPrice(Variant $variant): ?float
+	{
+		if (! $variant->getOnPromotion() || $this->feed->getSpec()->separatesSalePrice()) {
+			return $variant->getPrice();
+		}
+
+		return $variant->getPromotionalPrice();
+	}
+
+	/**
+	 * An untracked variant has no stock number to send, and a zero would read as out of stock on a
+	 * platform that hides items by their quantity.
+	 */
+	private function inventoryQuantity(Variant $variant): ?string
+	{
+		$variantStock = $this->variantStock[(int) $variant->id] ?? null;
+
+		return $variantStock === null || ! $variantStock['inventoryTracked']
+			? null
+			: (string) ($variantStock['stock'] ?? 0);
 	}
 
 	private function decimalPrice(?float $price): ?string
@@ -434,9 +425,8 @@ class VariantSource extends FeedSource
 	}
 
 	/**
-	 * Only the Sales system exposes a promotion window on the element. Catalog pricing rules store their
-	 * dates on the `commerce_catalogpricing` row that sets the price, but Commerce's element API hands
-	 * back only the `MIN()`-aggregated price with those dates grouped out, so the attribute is omitted.
+	 * Catalog pricing rules do not expose a start and end date on the element, so a store using them
+	 * sends no sale window at all. Only the older Sales system carries the dates.
 	 *
 	 * @throws InvalidConfigException
 	 */

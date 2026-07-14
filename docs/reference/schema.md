@@ -13,7 +13,7 @@ One row per feed. A feed belongs to one site, and its build history lives on the
 | `id` | integer | Primary key. |
 | `name` | string | What the admin called the feed. |
 | `handle` | string | Unique per site, so the same handle can run on each of a store's sites. Appears in the feed URL. |
-| `platform` | string(16) | `google`, `meta`, `microsoft`, `pinterest`, or `tiktok`. |
+| `platform` | string(16) | `google`, `klaviyo`, `meta`, `microsoft`, `pinterest`, or `tiktok`. |
 | `source` | string(16) | `variants` or `entries`. |
 | `siteId` | integer | Foreign key to `sites.id`, `ON DELETE CASCADE`. Indexed. |
 | `sourceIds` | text | JSON. Product type IDs for a variant feed, `sectionId:entryTypeId` pairs for an entry feed. Empty means every source whose items have a public URL. |
@@ -25,7 +25,7 @@ One row per feed. A feed belongs to one site, and its build history lives on the
 | `imageHeight` | smallint unsigned | Null when a named transform carries the size. |
 | `imageFit` | string | `crop` or `fit`. Default: `crop`. |
 | `token` | string(32) | Unique, indexed. The only credential on the public feed route, so it comes from Craft's CSPRNG. Rotating it mints a new one and deletes the old artifact. |
-| `enabled` | boolean | Default: `true`. Indexed, because the scheduler enqueues every enabled feed. |
+| `enabled` | boolean | Default: `true`. |
 | `sortOrder` | smallint unsigned | The order the feeds index lists them in. |
 | `lastBuildStatus` | string(16) | `pending`, `building`, `ok`, or `failed`. Default: `pending`. |
 | `lastBuildStartedAt` | datetime | UTC. A build stuck in `building` past the build timeout is treated as stalled and queued again. |
@@ -33,7 +33,7 @@ One row per feed. A feed belongs to one site, and its build history lives on the
 | `lastBuildItemCount` | integer | Items the last build wrote to the feed. |
 | `lastBuildSkippedCount` | integer | Items it excluded for a blank required attribute. |
 | `lastBuildBytes` | bigint | Size of the gzipped artifact. The compressed route 404s until this is set. |
-| `lastBuildBytesUncompressed` | bigint | What the `.xml` route serves. Read from the gzip trailer. |
+| `lastBuildBytesUncompressed` | bigint | What the uncompressed route serves. Read from the gzip trailer. |
 | `lastBuildError` | text | The failure message, shown in the feeds index. |
 | `lastBuildDiagnostics` | text | JSON. See below. |
 | `dateCreated` | datetime | |

@@ -24,7 +24,7 @@ class AutoRebuildTest extends IntegrationTestCase
 
 		$this->plugin()->getAutoRebuild()->onSave($this->productOf($variant), false);
 
-		$this->assertTrue($this->feeds()->isBuildPending((int) $feed->id));
+		$this->assertTrue($this->buildQueue()->isBuildPending((int) $feed->id));
 	}
 
 	/**
@@ -41,7 +41,7 @@ class AutoRebuildTest extends IntegrationTestCase
 		$autoRebuild->onSave($variant, false);
 		$autoRebuild->onSave($product, false);
 
-		$this->assertTrue($this->feeds()->isBuildPending((int) $feed->id));
+		$this->assertTrue($this->buildQueue()->isBuildPending((int) $feed->id));
 		$this->assertSame(1, $this->queuedBuildCount(), 'Three saves of one product should queue one build.');
 	}
 
@@ -57,7 +57,7 @@ class AutoRebuildTest extends IntegrationTestCase
 
 		$this->plugin()->getAutoRebuild()->onSave($product, false);
 
-		$this->assertFalse($this->feeds()->isBuildPending((int) $feed->id));
+		$this->assertFalse($this->buildQueue()->isBuildPending((int) $feed->id));
 	}
 
 	public function testAPropagatingSaveDoesNotQueueABuild(): void
@@ -68,7 +68,7 @@ class AutoRebuildTest extends IntegrationTestCase
 
 		$this->plugin()->getAutoRebuild()->onSave($product, false);
 
-		$this->assertFalse($this->feeds()->isBuildPending((int) $feed->id));
+		$this->assertFalse($this->buildQueue()->isBuildPending((int) $feed->id));
 	}
 
 	/**
@@ -84,13 +84,15 @@ class AutoRebuildTest extends IntegrationTestCase
 
 		$product = $this->productOf($this->firstVariantIn($variantFeed));
 
-		$this->assertTrue(FeedSource::forFeed($variantFeed)->reads($product));
-		$this->assertFalse(FeedSource::forFeed($entryFeed)->reads($product));
+		$this->assertTrue(FeedSource::forFeed($variantFeed)->handles($product));
+		$this->assertFalse(FeedSource::forFeed($entryFeed)->handles($product));
 
 		$entry = Entry::find()->one();
-		if ($entry instanceof Entry) {
-			$this->assertFalse(FeedSource::forFeed($variantFeed)->reads($entry));
+		if (! $entry instanceof Entry) {
+			$this->markTestSkipped('This install has no entry to assert the variant feed ignores.');
 		}
+
+		$this->assertFalse(FeedSource::forFeed($variantFeed)->handles($entry));
 	}
 
 	/**
@@ -101,7 +103,7 @@ class AutoRebuildTest extends IntegrationTestCase
 		$feed = $this->enabledVariantFeed('absorbs');
 		$product = $this->productOf($this->firstVariantIn($feed));
 
-		$this->feeds()->requestBuild((int) $feed->id);
+		$this->buildQueue()->requestBuild((int) $feed->id);
 		$queuedBefore = $this->queuedBuildCount();
 
 		$this->plugin()->getAutoRebuild()->onSave($product, false);
@@ -118,11 +120,11 @@ class AutoRebuildTest extends IntegrationTestCase
 		$feed = $this->enabledVariantFeed('delete');
 		$product = $this->productOf($this->firstVariantIn($feed));
 
-		$this->assertTrue(FeedSource::forFeed($feed)->mightRead($product));
+		$this->assertTrue(FeedSource::forFeed($feed)->mightContain($product));
 
 		$this->plugin()->getAutoRebuild()->onDelete($product);
 
-		$this->assertTrue($this->feeds()->isBuildPending((int) $feed->id));
+		$this->assertTrue($this->buildQueue()->isBuildPending((int) $feed->id));
 	}
 
 	private function enabledVariantFeed(string $handle): Feed

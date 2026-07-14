@@ -8,16 +8,13 @@ use XMLWriter;
 use yii\base\Exception;
 
 /**
- * Streams an RSS 2.0 document straight into gzip.
- *
- * The `compress.zlib://` wrapper compresses as `XMLWriter` writes, so memory stays flat regardless of
- * item count.
+ * Streams an RSS 2.0 document with Google's `g:` namespace.
  */
-class RssFeedWriter implements FeedWriterInterface
+class RssFeedWriter extends FeedWriter
 {
 	/**
-	 * Everything XML 1.0 forbids in character data. `XMLWriter::text()` passes these bytes through
-	 * unescaped, and one of them makes the whole document unparseable.
+	 * Everything XML 1.0 forbids in character data. `XMLWriter::text()` passes these through unescaped,
+	 * and one of them makes the whole document unparseable.
 	 *
 	 * @see https://www.w3.org/TR/xml/#charsets
 	 */
@@ -26,12 +23,13 @@ class RssFeedWriter implements FeedWriterInterface
 	private ?XMLWriter $xmlWriter = null;
 
 	public function __construct(
-		private readonly string $filePath,
+		string $filePath,
 		private readonly string $channelTitle,
 		private readonly string $channelLink,
 		private readonly string $namespacePrefix,
 		private readonly string $namespaceUri,
 	) {
+		parent::__construct($filePath);
 	}
 
 	/**
@@ -41,8 +39,8 @@ class RssFeedWriter implements FeedWriterInterface
 	{
 		$writer = new XMLWriter();
 
-		if (! $writer->openUri('compress.zlib://' . $this->filePath)) {
-			throw new Exception(sprintf('Could not open “%s” for writing.', $this->filePath));
+		if (! $writer->openUri($this->streamPath())) {
+			throw $this->openFailed();
 		}
 
 		$writer->startDocument('1.0', 'UTF-8');
@@ -50,9 +48,9 @@ class RssFeedWriter implements FeedWriterInterface
 		$writer->writeAttribute('version', '2.0');
 		$writer->writeAttributeNs('xmlns', $this->namespacePrefix, null, $this->namespaceUri);
 		$writer->startElement('channel');
-		$writer->writeElement('title', self::clean($this->channelTitle));
-		$writer->writeElement('link', self::clean($this->channelLink));
-		$writer->writeElement('description', self::clean($this->channelTitle));
+		$writer->writeElement('title', $this->clean($this->channelTitle));
+		$writer->writeElement('link', $this->clean($this->channelLink));
+		$writer->writeElement('description', $this->clean($this->channelTitle));
 
 		$this->xmlWriter = $writer;
 	}
@@ -62,14 +60,14 @@ class RssFeedWriter implements FeedWriterInterface
 	 */
 	public function writeItem(array $item): void
 	{
-		$writer = $this->xmlWriter ?? throw new Exception('The feed writer is not open.');
+		$writer = $this->xmlWriter ?? throw $this->notOpen();
 
 		$writer->startElement('item');
 
-		foreach ($item as $handle => $value) {
-			foreach (is_array($value) ? $value : [$value] as $single) {
-				$writer->startElementNs($this->namespacePrefix, $handle, null);
-				$writer->text(self::clean($single));
+		foreach ($item as $attributeName => $value) {
+			foreach (is_array($value) ? $value : [$value] as $singleValue) {
+				$writer->startElementNs($this->namespacePrefix, $attributeName, null);
+				$writer->text($this->clean($singleValue));
 				$writer->endElement();
 			}
 		}
@@ -82,7 +80,7 @@ class RssFeedWriter implements FeedWriterInterface
 	 */
 	public function flush(): void
 	{
-		$writer = $this->xmlWriter ?? throw new Exception('The feed writer is not open.');
+		$writer = $this->xmlWriter ?? throw $this->notOpen();
 
 		$this->assertFlushed($writer->flush());
 	}
@@ -92,34 +90,24 @@ class RssFeedWriter implements FeedWriterInterface
 	 */
 	public function close(): void
 	{
-		$writer = $this->xmlWriter ?? throw new Exception('The feed writer is not open.');
+		$writer = $this->xmlWriter ?? throw $this->notOpen();
 
 		$writer->endElement();
 		$writer->endElement();
 		$writer->endDocument();
 		$this->assertFlushed($writer->flush());
 
-		// XMLWriter has no close(). The gzip stream writes its trailer when the last reference drops, so
-		// the local has to go too.
+		// XMLWriter has no close(): the gzip stream writes its trailer only when the last reference drops.
 		$this->xmlWriter = null;
 		unset($writer);
-
-		clearstatcache(true, $this->filePath);
-		if (! is_file($this->filePath) || filesize($this->filePath) === 0) {
-			throw new Exception(sprintf('The feed file “%s” was not written.', $this->filePath));
-		}
 	}
 
-	public function abort(): void
+	protected function releaseHandle(): void
 	{
 		$this->xmlWriter = null;
-
-		if (is_file($this->filePath)) {
-			@unlink($this->filePath);
-		}
 	}
 
-	public static function clean(string $value): string
+	private function clean(string $value): string
 	{
 		$cleaned = preg_replace(self::INVALID_XML_CHARACTERS, '', $value);
 
@@ -135,15 +123,15 @@ class RssFeedWriter implements FeedWriterInterface
 	}
 
 	/**
-	 * `XMLWriter::flush()` returns a byte count for URI writers and the buffer for memory writers.
-	 * libxml reports IO errors as false or a negative count. Zero means nothing was buffered.
+	 * `XMLWriter::flush()` returns a byte count for URI writers. libxml reports an IO error as false or a
+	 * negative count; zero just means nothing was buffered.
 	 *
 	 * @throws Exception
 	 */
 	private function assertFlushed(int|string|false $result): void
 	{
 		if ($result === false || (is_int($result) && $result < 0)) {
-			throw new Exception(sprintf('Failed writing feed data to “%s”.', $this->filePath));
+			throw $this->writeFailed();
 		}
 	}
 }

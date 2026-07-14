@@ -13,6 +13,7 @@ return [
 
 	// Platforms and sources
 	'platform.google' => 'Google Merchant Center',
+	'platform.klaviyo' => 'Klaviyo catalog',
 	'platform.meta' => 'Meta Commerce Manager',
 	'platform.microsoft' => 'Microsoft Merchant Center',
 	'platform.pinterest' => 'Pinterest catalogs',
@@ -85,6 +86,7 @@ return [
 	'feed.imageHeightLabel' => 'Height',
 	'feed.imageFitLabel' => 'Fit',
 	'feed.imageSizeGoogle' => 'Use 800 by 800 px or larger for Google, and never below the 500 by 500 minimum.',
+	'feed.imageSizeKlaviyo' => 'Klaviyo publishes no minimum, and its emails render the image at the width of the block it sits in.',
 	'feed.imageSizeMeta' => 'Use 1024 by 1024 px for Meta, and never below the 500 by 500 minimum.',
 	'feed.imageSizeMicrosoft' => 'Microsoft recommends 200 by 200 px and publishes no minimum. Images up to 3.9 MB are accepted.',
 	'feed.imageSizePinterest' => 'Pinterest needs a portrait image, 1000 by 1500 px at the smallest. A square image is below its minimum.',
@@ -101,6 +103,7 @@ return [
 	'imageTest.button' => 'Test image',
 	'imageTest.noProduct' => 'No product was found for this source.',
 	'imageTest.noUrl' => 'The image mapping produced no URL for the first product. Check the mapping, and that the engine’s plugin is installed and configured.',
+	'imageTest.notAnImage' => 'The URL did not return an image. It answered with HTTP {status} ({contentType}).',
 	'imageTest.meetsMinimum' => 'Meets the {width}x{height} minimum.',
 	'imageTest.belowMinimum' => 'Below the {width}x{height} minimum.',
 
@@ -124,6 +127,7 @@ return [
 	'mapping.nonPositivePrice' => '{n} items priced at zero or less',
 	'mapping.docLink' => '{platform} documentation',
 	'mapping.identifierExistsNotice' => 'When brand, gtin and mpn are all blank on an item, the feed sends identifier_exists=no.',
+	'mapping.klaviyoNotice' => 'Klaviyo names its own fields with a $ prefix, so id is published as $id. Add the feed’s URL to Klaviyo as a Catalog Source, then map each field there.',
 	'mapping.excludedHeading' => 'Excluded products',
 	'mapping.excludedIntro' => 'The last build left out {count} items because a required attribute was blank. Open one to fix it, then rebuild.',
 	'mapping.excludedReason' => 'missing {attribute}',
@@ -131,7 +135,8 @@ return [
 	'mapping.excludedDownload' => 'Download full list (CSV)',
 
 	// Attribute notes
-	'attribute.priceNote' => 'A price of zero or less is rejected, except for contract phones and subscription hardware. The item is sent either way.',
+	'attribute.priceNote' => 'The platform rejects a price of zero or less, except on contract phones and subscription hardware. The feed sends the item either way, and counts it here.',
+	'attribute.inventoryPolicyNote' => 'What Klaviyo does with an item once its stock reaches zero. 1 hides it from product blocks and recommendations, and back in stock flows use it. 0 and 2 keep showing it.',
 
 	// Preview
 	'preview.heading' => 'Preview',
@@ -150,9 +155,9 @@ return [
 	'settings.buildTimeout' => 'Build timeout',
 	'settings.buildTimeoutInstructions' => 'Seconds a build may run. Craft Cloud caps queue jobs at 15 minutes regardless of this setting.',
 	'settings.buildInterval' => 'Build interval',
-	'settings.buildIntervalInstructions' => 'Seconds a feed may go without rebuilding. The scheduled command rebuilds a feed once it is older than this, so it is safe to run the command more often.',
+	'settings.buildIntervalInstructions' => 'Seconds a feed may go without rebuilding. The scheduled command rebuilds a feed once it is older than this.',
 	'settings.rebuildOnChange' => 'Rebuild when products change',
-	'settings.rebuildOnChangeInstructions' => 'Rebuild a feed as soon as a product in it is edited or deleted, so a price change reaches the platform without waiting for the next scheduled build. Editing several products in a row rebuilds the feed once. Stock levels are the exception: changing one does not edit the product, so a stock change on its own triggers no rebuild. Every build reads current stock.',
+	'settings.rebuildOnChangeInstructions' => 'Rebuild a feed as soon as a product in it is edited or deleted, instead of waiting for the next scheduled build. A stock change on its own does not trigger a rebuild, but every build reads current stock.',
 
 	// Jobs
 	'job.buildFeed' => 'Building product feed',
@@ -163,10 +168,15 @@ return [
 
 	// Errors
 	'error.attributeAlreadyTaken' => '“{value}” is already in use.',
+	'error.invalidValue' => 'The value posted for “{param}” isn’t one this feed accepts.',
 	'error.noFilesystem' => 'No filesystem is configured for product feeds. Choose one in the plugin’s settings.',
 	'error.missingFilesystem' => 'The “{handle}” filesystem no longer exists.',
 	'error.builtFileUnreadable' => 'The built feed file could not be read back. Check the temp directory’s free space and permissions.',
 	'error.publishFailed' => 'The built feed could not be moved into place at “{path}” on the feed filesystem.',
+	'error.writerOpenFailed' => 'The feed file at “{path}” could not be opened for writing.',
+	'error.writerWriteFailed' => 'The feed data could not be written to “{path}”.',
+	'error.writerNotOpen' => 'The feed file was never opened.',
+	'error.excludedReportOpenFailed' => 'The excluded products report at “{path}” could not be opened for writing.',
 	'error.noStoreForSite' => 'This feed’s site isn’t assigned to a Commerce store, so it has no currency.',
 	'error.noSourcesWithUrls' => 'Nothing this feed can read has a public URL on this site. A feed item needs a landing page.',
 	'error.sourcesWithoutUrls' => 'These have no public URL on this site, so their items would have no landing page: {names}',

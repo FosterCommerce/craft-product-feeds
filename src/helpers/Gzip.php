@@ -22,15 +22,15 @@ final class Gzip
 		}
 
 		fseek($handle, -4, SEEK_END);
-		$tail = fread($handle, 4);
+		$isizeBytes = fread($handle, 4);
 		fclose($handle);
 
-		if ($tail === false || strlen($tail) !== 4) {
+		if ($isizeBytes === false || strlen($isizeBytes) !== 4) {
 			return null;
 		}
 
 		/** @var array{1: int} $unpacked */
-		$unpacked = unpack('V', $tail);
+		$unpacked = unpack('V', $isizeBytes);
 
 		return $unpacked[1];
 	}

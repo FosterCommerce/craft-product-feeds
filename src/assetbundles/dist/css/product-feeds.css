@@ -74,22 +74,6 @@
 .pf-attribute-doc { margin-block: 6px 0; }
 .pf-attribute-doc a { font-size: 12px; }
 
-/* Fade the doc links until the row is hovered. Guarded on (hover: hover): a touch screen never
-   hovers, so the link would be unreachable at opacity 0. */
-@media (hover: hover) {
-	.pf-attribute-doc { opacity: 0; }
-	.pf-mapping-table tr:hover .pf-attribute-doc,
-	.pf-attribute-doc:focus-within { opacity: 1; }
-}
-
-@media (hover: hover) and (prefers-reduced-motion: no-preference) {
-	.pf-attribute-doc { transition: opacity 100ms ease-out; }
-}
-
-@media only screen and (width <= 767px) {
-	.pf-attribute-doc { display: none; }
-}
-
 /* Excluded products */
 .pf-excluded-list { margin: 8px 0 0; padding: 0; list-style: none; }
 .pf-excluded-item {
@@ -103,7 +87,8 @@
 .pf-test-thumb { max-height: 120px; border-radius: 3px; margin-top: 8px; }
 #image-test-output { margin-top: 10px; }
 
-/* Image engine group: the JS-toggled wrapper divs would otherwise collapse Craft's field rhythm. */
+/* The JS-toggled wrappers have no margin of their own, so without this the fields inside them sit
+   flush against the field above. */
 #image-craft-transform,
 #image-size,
 #image-test { margin-top: var(--m); }

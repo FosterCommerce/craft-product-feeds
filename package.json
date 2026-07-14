@@ -1,0 +1,13 @@
+{
+	"name": "product-feeds",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"lint:js": "eslint src/assetbundles/dist/js",
+		"lint:js:fix": "eslint src/assetbundles/dist/js --fix"
+	},
+	"devDependencies": {
+		"eslint": "^9.15.0",
+		"globals": "^15.12.0"
+	}
+}

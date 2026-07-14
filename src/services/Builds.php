@@ -13,23 +13,22 @@ use craft\errors\FsException;
 use craft\helpers\FileHelper;
 use craft\helpers\UrlHelper;
 use DateTime;
-use fostercommerce\productfeeds\enums\AttributeKind;
 use fostercommerce\productfeeds\enums\BuildStatus;
 use fostercommerce\productfeeds\errors\FeedBuildException;
 use fostercommerce\productfeeds\feeds\AttributeDefinition;
 use fostercommerce\productfeeds\feeds\ExcludedReport;
 use fostercommerce\productfeeds\feeds\FeedSpec;
-use fostercommerce\productfeeds\helpers\FeedValue;
+use fostercommerce\productfeeds\feeds\FeedWriter;
+use fostercommerce\productfeeds\feeds\ItemBuilder;
 use fostercommerce\productfeeds\helpers\Gzip;
 use fostercommerce\productfeeds\helpers\Mapping;
 use fostercommerce\productfeeds\models\BuildDiagnostics;
 use fostercommerce\productfeeds\models\BuildResult;
 use fostercommerce\productfeeds\models\Feed;
+use fostercommerce\productfeeds\models\ImageTestResult;
 use fostercommerce\productfeeds\models\UrlCheck;
 use fostercommerce\productfeeds\ProductFeeds;
 use fostercommerce\productfeeds\sources\FeedSource;
-use Money\Currency;
-use Money\Money;
 use Throwable;
 use yii\base\Exception;
 use yii\base\InvalidConfigException;
@@ -37,34 +36,44 @@ use yii\base\InvalidConfigException;
 class Builds extends Component
 {
 	/**
+	 * Builds a feed under its lock. The entry point for anything that builds a live feed: the queue job and
+	 * the console command.
+	 *
+	 * Standing down is the caller's to handle: `BuildFeed` comes back later, the console reports it.
+	 *
 	 * @param (callable(int, int): void)|null $onProgress
+	 * @return BuildResult|null null when another build already holds the lock
 	 * @throws FeedBuildException
 	 * @throws FsException
 	 * @throws InvalidConfigException
 	 * @throws Throwable
 	 */
-	public function buildAndRecord(Feed $feed, ?callable $onProgress = null): BuildResult
+	public function buildUnderLock(Feed $feed, ?callable $onProgress = null): ?BuildResult
 	{
-		$feeds = $this->feeds();
+		$buildQueue = ProductFeeds::plugin()->getBuildQueue();
+		$feedId = (int) $feed->id;
 
-		$startedAt = new DateTime();
-		$feeds->recordBuild($feed, BuildStatus::Building, $startedAt);
+		$mutex = Craft::$app->getMutex();
+		$lockName = $buildQueue->buildLockName($feedId);
 
-		try {
-			$result = $this->build($feed, $onProgress);
-		} catch (Throwable $throwable) {
-			$feeds->recordBuild($feed, BuildStatus::Failed, $startedAt, error: $throwable->getMessage());
-
-			throw $throwable;
+		if (! $mutex->acquire($lockName)) {
+			return null;
 		}
 
-		$feeds->recordBuild($feed, BuildStatus::Ok, $startedAt, $result);
-		$feeds->recordUrlCheck($feed, $this->checkFeedUrl($feeds->getFeedUrl($feed)));
+		// This build reads the catalog as it stands now, so an edit landing from here on needs its own build.
+		$buildQueue->clearPending($feedId);
 
-		return $result;
+		try {
+			return $this->buildAndRecord($feed, $onProgress);
+		} finally {
+			$mutex->release($lockName);
+		}
 	}
 
 	/**
+	 * Streams the whole catalog into the artifact and publishes it. Takes no lock and records nothing:
+	 * a live build goes through `buildUnderLock()`.
+	 *
 	 * @param (callable(int, int): void)|null $onProgress
 	 * @throws FeedBuildException on a configuration error that retrying cannot fix
 	 * @throws FsException
@@ -73,90 +82,45 @@ class Builds extends Component
 	 */
 	public function build(Feed $feed, ?callable $onProgress = null): BuildResult
 	{
-		$feeds = $this->feeds();
-
-		$spec = FeedSpec::forPlatform($feed->getPlatform());
+		$spec = $feed->getSpec();
 		$source = FeedSource::forFeed($feed);
 		$this->assertBuildable($feed, $spec, $source);
 
-		// Resolved before an item is read: a missing filesystem is a configuration error, and finding it
-		// out only at publish time would waste a whole pass over the catalog.
-		$fs = $feeds->getFs();
-		$tempPath = sprintf('%s/%s.%s.gz', Craft::$app->getPath()->getTempPath(), $feed->token, $spec->fileExtension());
-		$writer = $spec->writer(
-			$tempPath,
-			$feed->name,
-			UrlHelper::siteUrl('', null, null, $feed->siteId)
-		);
+		// Resolved up front: a missing filesystem is a configuration error, and finding out at publish time
+		// would waste a whole pass over the catalog.
+		$fs = $this->feeds()->getFs();
 
-		$itemCount = 0;
+		$tempDirectory = Craft::$app->getPath()->getTempPath();
+		$tempPath = sprintf('%s/%s', $tempDirectory, $feed->getFileName());
+		$reportPath = sprintf('%s/%s', $tempDirectory, $feed->getExcludedReportFileName());
+
 		$diagnostics = new BuildDiagnostics();
-
-		/** @var ProductFeeds $plugin */
-		$plugin = ProductFeeds::getInstance();
-
-		$query = $source->query();
-		// ElementQuery::count() returns whatever type the PDO driver gave it, string included.
-		$total = (int) $query->count();
-		$batchSize = $plugin->getSettings()->batchSize;
-
-		$reportPath = sprintf('%s/%s-excluded.csv', Craft::$app->getPath()->getTempPath(), $feed->token);
+		$writer = $spec->writer($tempPath, $feed->name, UrlHelper::siteUrl('', null, null, $feed->siteId));
 		$report = new ExcludedReport($reportPath);
+		$itemBuilder = new ItemBuilder($feed, $spec, $source, $diagnostics);
 
-		$writer->open();
-
-		try {
-			foreach ($query->batch($batchSize) as $batch) {
-				/** @var ElementInterface[] $batch */
-				$source->prepareBatch($batch);
-
-				foreach ($batch as $element) {
-					$item = $this->buildItem($element, $feed, $spec, $source, $diagnostics);
-					$missing = $this->missingRequired($item, $spec);
-
-					if ($missing !== null) {
-						$diagnostics->countSkipped($missing);
-						$diagnostics->sampleSkipped((int) $element->id, $missing);
-						$report->write($source->reportRow($element, $missing));
-
-						continue;
-					}
-
-					$writer->writeItem($this->documentItem($item, $spec));
-					$itemCount++;
-				}
-
-				$writer->flush();
-
-				if ($onProgress !== null) {
-					$onProgress($itemCount, $total);
-				}
-			}
-
-			$writer->close();
-			$report->close();
-		} catch (Throwable $throwable) {
-			$writer->abort();
-			$report->close();
-			FileHelper::unlink($reportPath);
-
-			throw $throwable;
-		}
+		$itemCount = $this->writeItems($source, $writer, $report, $itemBuilder, $onProgress);
 
 		$bytes = (int) filesize($tempPath);
 		$bytesUncompressed = Gzip::uncompressedSize($tempPath);
 
-		$this->publishFile($fs, $tempPath, $feed->getPath());
-		$this->publishReport($fs, $feed, $reportPath, $diagnostics->skippedCount() > 0);
+		try {
+			$this->publishFile($fs, $tempPath, $feed->getPath());
+			$this->publishReport($fs, $feed, $reportPath, $diagnostics->skippedCount() > 0);
+		} finally {
+			// `publishFile()` only clears the temp file it was handed, so a throw before the report is
+			// published strands the report's own.
+			if (is_file($reportPath)) {
+				FileHelper::unlink($reportPath);
+			}
+		}
 
 		return new BuildResult($itemCount, $bytes, $bytesUncompressed, $diagnostics);
 	}
 
 	/**
-	 * The first items a build would publish, with the reason it would skip each one it cannot.
-	 *
-	 * A blank attribute is dropped from the item, so an item missing a required one would otherwise
-	 * preview as complete.
+	 * The first items a build would publish, with the reason it would skip each one it cannot. Blank
+	 * attributes are dropped from an item, so without the reason a skipped item previews as complete.
 	 *
 	 * @return list<array{elementId: int, item: array<string, string|list<string>>, missing: ?string}>
 	 * @throws InvalidConfigException
@@ -164,7 +128,7 @@ class Builds extends Component
 	 */
 	public function preview(Feed $feed, int $limit = 10): array
 	{
-		$spec = FeedSpec::forPlatform($feed->getPlatform());
+		$spec = $feed->getSpec();
 		$source = FeedSource::forFeed($feed);
 
 		/** @var ElementInterface[] $elements */
@@ -172,16 +136,16 @@ class Builds extends Component
 		$source->prepareBatch($elements);
 
 		// The preview shows the items, not the counts, so these are collected and dropped.
-		$diagnostics = new BuildDiagnostics();
+		$itemBuilder = new ItemBuilder($feed, $spec, $source, new BuildDiagnostics());
 		$rows = [];
 
 		foreach ($elements as $element) {
-			$item = $this->buildItem($element, $feed, $spec, $source, $diagnostics);
-			$missing = $this->missingRequired($item, $spec);
+			$item = $itemBuilder->forElement($element);
+			$missing = $itemBuilder->missingRequired($item);
 
 			$rows[] = [
 				'elementId' => (int) $element->id,
-				'item' => $this->documentItem($item, $spec),
+				'item' => $itemBuilder->renameForDocument($item),
 				'missing' => $missing === null ? null : $spec->documentName($missing),
 			];
 		}
@@ -190,12 +154,89 @@ class Builds extends Component
 	}
 
 	/**
+	 * Required attributes with neither a mapping nor a default value.
+	 *
+	 * @return string[]
+	 */
+	public function unmappedRequiredAttributes(Feed $feed, FeedSpec $spec, FeedSource $source): array
+	{
+		$unmapped = [];
+
+		foreach ($source->mappableAttributes($spec) as $name => $attributeDefinition) {
+			if (! $attributeDefinition->required) {
+				continue;
+			}
+
+			$mappingSource = $feed->mappingSource($name, $spec);
+
+			if (Mapping::parse($mappingSource)['kind'] === Mapping::NO_INCLUDE) {
+				$unmapped[] = $name;
+				continue;
+			}
+
+			if ($mappingSource === Mapping::USE_DEFAULT && $feed->mappingDefault($name) === '') {
+				$unmapped[] = $name;
+			}
+		}
+
+		return $unmapped;
+	}
+
+	/**
+	 * Fetches the image the first item of the feed would publish, so the admin can see what the platform
+	 * will receive before a build runs.
+	 *
+	 * @throws InvalidConfigException
+	 */
+	public function testImage(Feed $feed): ImageTestResult
+	{
+		$spec = $feed->getSpec();
+		$minimumSize = $spec->minimumImageSize();
+		$imageAttribute = $spec->imageAttribute();
+
+		$source = FeedSource::forFeed($feed);
+		$element = $source->query()->limit(1)->one();
+		$attributeDefinition = $imageAttribute === null ? null : ($spec->attributes()[$imageAttribute] ?? null);
+
+		if (! $element instanceof ElementInterface || ! $attributeDefinition instanceof AttributeDefinition) {
+			return ImageTestResult::failed($minimumSize, Craft::t(ProductFeeds::HANDLE, 'imageTest.noProduct'));
+		}
+
+		$itemBuilder = new ItemBuilder($feed, $spec, $source, new BuildDiagnostics());
+		$url = $itemBuilder->mappedValues($element, $attributeDefinition)[0] ?? null;
+		if ($url === null || $url === '') {
+			return ImageTestResult::failed($minimumSize, Craft::t(ProductFeeds::HANDLE, 'imageTest.noUrl'));
+		}
+
+		try {
+			$response = Craft::createGuzzleClient([
+				'timeout' => 10,
+			])->get($url, [
+				'http_errors' => false,
+			]);
+		} catch (Throwable $throwable) {
+			return ImageTestResult::failed($minimumSize, $throwable->getMessage(), $url);
+		}
+
+		$size = @getimagesizefromstring((string) $response->getBody());
+
+		return ImageTestResult::fetched(
+			$minimumSize,
+			$url,
+			$response->getStatusCode(),
+			$response->getHeaderLine('Content-Type') ?: null,
+			is_array($size) ? $size[0] : null,
+			is_array($size) ? $size[1] : null,
+		);
+	}
+
+	/**
 	 * Configuration errors, all of them permanent, so the queue job must not retry them.
 	 *
 	 * @throws FeedBuildException
 	 * @throws InvalidConfigException
 	 */
-	public function assertBuildable(Feed $feed, FeedSpec $spec, FeedSource $source): void
+	private function assertBuildable(Feed $feed, FeedSpec $spec, FeedSource $source): void
 	{
 		if (! $feed->getStore() instanceof Store) {
 			throw new FeedBuildException(Craft::t(ProductFeeds::HANDLE, 'error.noStoreForSite'));
@@ -221,123 +262,72 @@ class Builds extends Component
 	}
 
 	/**
-	 * A missing `description` would skip every item, so the build refuses rather than publishing an
-	 * empty feed.
+	 * Streams the catalog into the writer, listing the items it has to skip in the excluded report.
 	 *
-	 * @return string[]
-	 */
-	public function unmappedRequiredAttributes(Feed $feed, FeedSpec $spec, FeedSource $source): array
-	{
-		$computed = $source->computedAttributes();
-		$unmapped = [];
-
-		foreach ($spec->attributes() as $name => $attributeDefinition) {
-			if (! $attributeDefinition->required) {
-				continue;
-			}
-
-			if (in_array($name, $computed, true)) {
-				continue;
-			}
-
-			$mapping = $feed->fieldMapping[$name] ?? null;
-			$source_ = $mapping['source'] ?? Mapping::NO_INCLUDE;
-			$default = $mapping['default'] ?? '';
-
-			if (Mapping::parse($source_)['kind'] === Mapping::NO_INCLUDE) {
-				$unmapped[] = $name;
-				continue;
-			}
-
-			if ($source_ === Mapping::USE_DEFAULT && $default === '') {
-				$unmapped[] = $name;
-			}
-		}
-
-		return $unmapped;
-	}
-
-	/**
-	 * @return array{ok: bool, url: ?string, status: ?int, contentType: ?string, width: ?int, height: ?int, meetsMinimum: bool, minimumWidth: ?int, minimumHeight: ?int, error: ?string}
+	 * @param (callable(int, int): void)|null $onProgress
+	 * @return int the number of items written
 	 * @throws InvalidConfigException
+	 * @throws Throwable
 	 */
-	public function testImage(Feed $feed): array
-	{
-		$spec = FeedSpec::forPlatform($feed->getPlatform());
-		$minimum = $spec->minimumImageSize();
-		$imageAttribute = $spec->imageAttribute();
+	private function writeItems(
+		FeedSource $source,
+		FeedWriter $writer,
+		ExcludedReport $report,
+		ItemBuilder $itemBuilder,
+		?callable $onProgress,
+	): int {
+		$query = $source->query();
+		// ElementQuery::count() returns whatever type the PDO driver gave it, string included.
+		$total = (int) $query->count();
+		$batchSize = ProductFeeds::plugin()->getSettings()->batchSize;
+		$itemCount = 0;
 
-		$blank = [
-			'ok' => false,
-			'url' => null,
-			'status' => null,
-			'contentType' => null,
-			'width' => null,
-			'height' => null,
-			'meetsMinimum' => false,
-			'minimumWidth' => $minimum[0] ?? null,
-			'minimumHeight' => $minimum[1] ?? null,
-			'error' => null,
-		];
-
-		$source = FeedSource::forFeed($feed);
-		$element = $source->query()->limit(1)->one();
-		$attributeDefinition = $imageAttribute === null ? null : ($spec->attributes()[$imageAttribute] ?? null);
-
-		if (! $element instanceof ElementInterface || ! $attributeDefinition instanceof AttributeDefinition) {
-			return [
-				...$blank,
-				'error' => Craft::t(ProductFeeds::HANDLE, 'imageTest.noProduct'),
-			];
-		}
-
-		$url = $this->mappedValues($element, $feed, $source, $attributeDefinition)[0] ?? null;
-		if ($url === null || $url === '') {
-			return [
-				...$blank,
-				'error' => Craft::t(ProductFeeds::HANDLE, 'imageTest.noUrl'),
-			];
-		}
+		$writer->open();
 
 		try {
-			$response = Craft::createGuzzleClient([
-				'timeout' => 10,
-			])->get($url, [
-				'http_errors' => false,
-			]);
+			foreach ($query->batch($batchSize) as $batch) {
+				/** @var ElementInterface[] $batch */
+				$source->prepareBatch($batch);
+
+				foreach ($batch as $element) {
+					$item = $itemBuilder->forElement($element);
+					$missing = $itemBuilder->missingRequired($item);
+
+					if ($missing !== null) {
+						$itemBuilder->recordSkip($element, $missing);
+						$report->write($source->reportRow($element, $missing));
+
+						continue;
+					}
+
+					$writer->writeItem($itemBuilder->renameForDocument($item));
+					$itemCount++;
+				}
+
+				$writer->flush();
+
+				if ($onProgress !== null) {
+					$onProgress($itemCount, $total);
+				}
+			}
+
+			$writer->close();
+			$report->close();
 		} catch (Throwable $throwable) {
-			return [
-				...$blank,
-				'url' => $url,
-				'error' => $throwable->getMessage(),
-			];
+			$writer->abort();
+			$report->abort();
+
+			throw $throwable;
 		}
 
-		$size = @getimagesizefromstring((string) $response->getBody());
-		$width = is_array($size) ? $size[0] : null;
-		$height = is_array($size) ? $size[1] : null;
-
-		return [
-			...$blank,
-			'ok' => $response->getStatusCode() === 200 && $size !== false,
-			'url' => $url,
-			'status' => $response->getStatusCode(),
-			'contentType' => $response->getHeaderLine('Content-Type') ?: null,
-			'width' => $width,
-			'height' => $height,
-			'meetsMinimum' => $minimum === null
-				|| ($width !== null && $height !== null && $width >= $minimum[0] && $height >= $minimum[1]),
-		];
+		return $itemCount;
 	}
 
 	/**
-	 * Advisory only. Never fails a build: a queue worker frequently cannot resolve its own site's
-	 * public hostname.
-	 *
-	 * Call this only once the build is recorded. The route answers 404 until the feed row carries the
-	 * artifact's size.
+	 * Advisory only: a queue worker frequently cannot resolve its own site's public hostname, so this
+	 * never fails a build.
 	 */
-	public function checkFeedUrl(string $url): UrlCheck
+	private function checkFeedUrl(string $url): UrlCheck
 	{
 		try {
 			$response = Craft::createGuzzleClient([
@@ -356,203 +346,34 @@ class Builds extends Component
 	}
 
 	/**
-	 * @return array<string, string|list<string>>
+	 * Writes the feed's build status to its row, whichever way the build ends.
+	 *
+	 * @param (callable(int, int): void)|null $onProgress
+	 * @throws FeedBuildException
+	 * @throws FsException
 	 * @throws InvalidConfigException
 	 * @throws Throwable
 	 */
-	private function buildItem(
-		ElementInterface $element,
-		Feed $feed,
-		FeedSpec $spec,
-		FeedSource $source,
-		BuildDiagnostics $diagnostics,
-	): array {
-		$computed = $source->computedAttributes();
-		$derived = $spec->derivedAttributes();
-		$imageAttribute = $spec->imageAttribute();
-		$galleryAttribute = $spec->galleryAttribute();
-
-		$item = [];
-		$imageValues = [];
-
-		foreach ($spec->attributes() as $name => $attributeDefinition) {
-			if (in_array($name, $derived, true)) {
-				continue;
-			}
-
-			$isComputed = in_array($name, $computed, true);
-			$values = $isComputed
-				? $this->asList($source->compute($element, $name))
-				: $this->mappedValues($element, $feed, $source, $attributeDefinition);
-
-			if ($attributeDefinition->attributeKind === AttributeKind::Money) {
-				$values = $this->asMoney($values, $feed, $spec, $name, $diagnostics);
-			}
-
-			if ($name === $galleryAttribute) {
-				$gallery = $this->galleryImages($feed, $spec, $name, $values, $imageValues);
-				if ($gallery !== []) {
-					$item[$name] = $gallery;
-				}
-
-				continue;
-			}
-
-			if ($values === []) {
-				// A computed `sale_price` is null on every item not on promotion, and "Don't include" is blank
-				// on all of them, so only a mapped attribute's blanks mean anything.
-				if (! $isComputed && $this->isMapped($feed, $name)) {
-					$diagnostics->countBlank($name);
-				}
-
-				continue;
-			}
-
-			if ($name === $imageAttribute) {
-				$imageValues = $values;
-			}
-
-			$item[$name] = $values[0];
-		}
-
-		return $spec->finalizeItem($item);
-	}
-
-	/**
-	 * @return list<string>
-	 * @throws InvalidConfigException
-	 */
-	private function mappedValues(
-		ElementInterface $element,
-		Feed $feed,
-		FeedSource $source,
-		AttributeDefinition $attributeDefinition,
-	): array {
-		$mapping = $feed->fieldMapping[$attributeDefinition->name] ?? null;
-		$spec = $mapping['source'] ?? Mapping::NO_INCLUDE;
-		$default = trim($mapping['default'] ?? '');
-
-		$parsed = Mapping::parse($spec);
-		if (in_array($parsed['kind'], [Mapping::NO_INCLUDE, Mapping::IMAGE_OVERFLOW], true)) {
-			return [];
-		}
-
-		$values = $parsed['kind'] === Mapping::USE_DEFAULT
-			? []
-			: $source->resolve($element, $spec, $attributeDefinition);
-
-		if ($values === [] && $default !== '') {
-			$values = $attributeDefinition->attributeKind === AttributeKind::Image
-				? $source->defaultImageUrl($default)
-				: [$default];
-		}
-
-		$kind = $attributeDefinition->attributeKind;
-		if ($kind === AttributeKind::Url || $kind === AttributeKind::Image) {
-			return array_values(array_filter($values, static fn (string $url): bool => UrlHelper::isAbsoluteUrl($url)));
-		}
-
-		return $values;
-	}
-
-	/**
-	 * @param list<string> $mappedValues resolved from the attribute's own source, empty for overflow
-	 * @param list<string> $imageValues the main image source's full list
-	 * @return list<string>
-	 */
-	private function galleryImages(Feed $feed, FeedSpec $spec, string $gallery, array $mappedValues, array $imageValues): array
+	private function buildAndRecord(Feed $feed, ?callable $onProgress = null): BuildResult
 	{
-		$source = $feed->fieldMapping[$gallery]['source'] ?? Mapping::IMAGE_OVERFLOW;
-		$limit = $spec->maxGalleryImages();
+		$feeds = $this->feeds();
 
-		return match (Mapping::parse($source)['kind']) {
-			Mapping::NO_INCLUDE => [],
-			Mapping::IMAGE_OVERFLOW => array_slice($imageValues, 1, $limit),
-			default => array_slice($mappedValues, 0, $limit),
-		};
-	}
+		$startedAt = new DateTime();
+		$feeds->recordBuild($feed, BuildStatus::Building, $startedAt);
 
-	private function isMapped(Feed $feed, string $attribute): bool
-	{
-		$source = $feed->fieldMapping[$attribute]['source'] ?? Mapping::NO_INCLUDE;
+		try {
+			$result = $this->build($feed, $onProgress);
+		} catch (Throwable $throwable) {
+			$feeds->recordBuild($feed, BuildStatus::Failed, $startedAt, error: $throwable->getMessage());
 
-		return Mapping::parse($source)['kind'] !== Mapping::NO_INCLUDE;
-	}
-
-	/**
-	 * @param list<string> $values bare decimals
-	 * @return list<string>
-	 */
-	private function asMoney(array $values, Feed $feed, FeedSpec $spec, string $attribute, BuildDiagnostics $diagnostics): array
-	{
-		$currency = $feed->getCurrency();
-		if (! $currency instanceof Currency) {
-			return [];
+			throw $throwable;
 		}
 
-		$formatted = [];
+		// The route 404s until the feed row carries the artifact's size.
+		$feeds->recordBuild($feed, BuildStatus::Ok, $startedAt, $result);
+		$feeds->recordUrlCheck($feed, $this->checkFeedUrl($feeds->getFeedUrl($feed)));
 
-		foreach ($values as $value) {
-			$money = FeedValue::moneyFromDecimal($value, $currency);
-			if (! $money instanceof Money) {
-				continue;
-			}
-
-			if (! $money->isPositive()) {
-				$diagnostics->countInvalid($attribute);
-			}
-
-			$formatted[] = $spec->formatMoney($money);
-		}
-
-		return $formatted;
-	}
-
-	/**
-	 * @param string|list<string>|null $value
-	 * @return list<string>
-	 */
-	private function asList(string|array|null $value): array
-	{
-		if ($value === null) {
-			return [];
-		}
-
-		$values = is_array($value) ? $value : [$value];
-
-		return array_values(array_filter($values, static fn (string $item): bool => $item !== ''));
-	}
-
-	/**
-	 * Renames the attributes the platform spells its own way, once the required check has run against
-	 * the shared names.
-	 *
-	 * @param array<string, string|list<string>> $item
-	 * @return array<string, string|list<string>>
-	 */
-	private function documentItem(array $item, FeedSpec $spec): array
-	{
-		$document = [];
-
-		foreach ($item as $attribute => $value) {
-			$document[$spec->documentName($attribute)] = $value;
-		}
-
-		return $document;
-	}
-
-	/**
-	 * @param array<string, string|list<string>> $item
-	 */
-	private function missingRequired(array $item, FeedSpec $spec): ?string
-	{
-		foreach ($spec->requiredAttributes() as $attribute) {
-			if (($item[$attribute] ?? '') === '') {
-				return $attribute;
-			}
-		}
-
-		return null;
+		return $result;
 	}
 
 	/**
@@ -581,18 +402,13 @@ class Builds extends Component
 	 */
 	private function feeds(): Feeds
 	{
-		/** @var ProductFeeds $plugin */
-		$plugin = ProductFeeds::getInstance();
-
-		return $plugin->getFeeds();
+		return ProductFeeds::plugin()->getFeeds();
 	}
 
 	/**
-	 * Writes the file under a staging name and renames it over the live one, so a fetch mid-publish gets
-	 * the previous file rather than a partial one or a 404.
-	 *
-	 * `Local::renameFile()` swallows a failed rename with `@rename()` and returns void, so the swap is
-	 * confirmed by size: the previous artifact would still pass an existence check.
+	 * Writes to a staging name and renames it over the live file, so a fetch mid-publish gets the previous
+	 * feed rather than a partial one. The swap is confirmed by size, because `Local::renameFile()`
+	 * swallows a failed rename and an existence check would still pass on the old artifact.
 	 *
 	 * @throws FeedBuildException
 	 * @throws FsException

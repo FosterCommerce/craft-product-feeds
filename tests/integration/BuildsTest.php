@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace fostercommerce\productfeeds\tests\integration;
 
-use craft\elements\Asset;
 use fostercommerce\productfeeds\enums\Availability;
 use fostercommerce\productfeeds\enums\Platform;
 use fostercommerce\productfeeds\errors\FeedBuildException;
@@ -19,8 +18,8 @@ class BuildsTest extends IntegrationTestCase
 	private const GOOGLE_NAMESPACE_URI = 'http://base.google.com/ns/1.0';
 
 	/**
-	 * A missing `description` would blank every item, so the build refuses rather than publishing an
-	 * empty feed the platform would accept.
+	 * A required attribute with no source blanks every item, so the build refuses instead of publishing an
+	 * empty feed.
 	 */
 	public function testABuildRefusesWhileARequiredAttributeIsUnmapped(): void
 	{
@@ -30,6 +29,7 @@ class BuildsTest extends IntegrationTestCase
 
 		$this->assertContains('description', $this->builds()->unmappedRequiredAttributes($feed, $spec, $source));
 
+		// Not `buildOrSkip()`: the refusal is what this test is asserting.
 		$this->expectException(FeedBuildException::class);
 		$this->builds()->build($feed);
 	}
@@ -56,14 +56,13 @@ class BuildsTest extends IntegrationTestCase
 
 	public function testABuiltFeedIsGzippedRssCarryingGooglesNamespace(): void
 	{
-		$feed = $this->buildableFeed('gzip');
-		$result = $this->builds()->build($feed);
+		$feed = $this->googleFeed('gzip');
+		$result = $this->buildOrSkip($feed);
 
-		$this->assertGreaterThan(0, $result->itemCount, 'The catalog produced no items to assert against.');
 		$this->assertGreaterThan(0, $result->bytes);
 		$this->assertNotNull($result->bytesUncompressed);
 
-		$document = new SimpleXMLElement($this->publishedXml($feed));
+		$document = new SimpleXMLElement($this->publishedArtifact($feed));
 
 		$this->assertSame('rss', $document->getName());
 		$this->assertSame(self::GOOGLE_NAMESPACE_URI, $document->getDocNamespaces()['g'] ?? null);
@@ -76,13 +75,11 @@ class BuildsTest extends IntegrationTestCase
 	 */
 	public function testEveryPublishedItemCarriesTheRequiredAttributes(): void
 	{
-		$feed = $this->buildableFeed('required');
-		$result = $this->builds()->build($feed);
+		$feed = $this->googleFeed('required');
+		$this->buildOrSkip($feed);
 
 		$spec = FeedSpec::forPlatform($feed->getPlatform());
-		$document = new SimpleXMLElement($this->publishedXml($feed));
-
-		$this->assertGreaterThan(0, $result->itemCount);
+		$document = new SimpleXMLElement($this->publishedArtifact($feed));
 
 		foreach ($document->channel->item as $item) {
 			$google = $item->children(self::GOOGLE_NAMESPACE_URI);
@@ -103,13 +100,13 @@ class BuildsTest extends IntegrationTestCase
 	 */
 	public function testPricesArePublishedAsADecimalAndACurrencyCode(): void
 	{
-		$feed = $this->buildableFeed('price');
-		$this->builds()->build($feed);
+		$feed = $this->googleFeed('price');
+		$this->buildOrSkip($feed);
 
 		$currencyCode = $feed->getCurrency()?->getCode();
 		$this->assertNotNull($currencyCode);
 
-		$document = new SimpleXMLElement($this->publishedXml($feed));
+		$document = new SimpleXMLElement($this->publishedArtifact($feed));
 
 		foreach ($document->channel->item as $item) {
 			$price = (string) $item->children(self::GOOGLE_NAMESPACE_URI)->price;
@@ -123,10 +120,10 @@ class BuildsTest extends IntegrationTestCase
 	 */
 	public function testAVariantFeedIdentifiesItemsBySkuAndGroupsThemByProduct(): void
 	{
-		$feed = $this->buildableFeed('ids');
-		$this->builds()->build($feed);
+		$feed = $this->googleFeed('ids');
+		$this->buildOrSkip($feed);
 
-		$document = new SimpleXMLElement($this->publishedXml($feed));
+		$document = new SimpleXMLElement($this->publishedArtifact($feed));
 
 		foreach ($document->channel->item as $item) {
 			$google = $item->children(self::GOOGLE_NAMESPACE_URI);
@@ -141,10 +138,10 @@ class BuildsTest extends IntegrationTestCase
 	 */
 	public function testIdentifierExistsIsSentWhenAnItemHasNoBrandGtinOrMpn(): void
 	{
-		$feed = $this->buildableFeed('identifier');
-		$this->builds()->build($feed);
+		$feed = $this->googleFeed('identifier');
+		$this->buildOrSkip($feed);
 
-		$document = new SimpleXMLElement($this->publishedXml($feed));
+		$document = new SimpleXMLElement($this->publishedArtifact($feed));
 
 		foreach ($document->channel->item as $item) {
 			$google = $item->children(self::GOOGLE_NAMESPACE_URI);
@@ -166,7 +163,7 @@ class BuildsTest extends IntegrationTestCase
 	 */
 	public function testPreviewReturnsTheItemsABuildWouldPublish(): void
 	{
-		$feed = $this->buildableFeed('preview');
+		$feed = $this->googleFeed('preview');
 		$rows = $this->builds()->preview($feed, 3);
 
 		$this->assertNotEmpty($rows);
@@ -198,81 +195,19 @@ class BuildsTest extends IntegrationTestCase
 	}
 
 	/**
-	 * A feed whose mapping is complete enough to publish items: `title` and `link` come off the product,
-	 * and the two remaining required attributes take defaults, so the test does not depend on which
-	 * custom fields the install happens to have.
+	 * A Google feed with the two attributes a shopping platform needs beyond the shared defaults.
 	 */
-	private function buildableFeed(string $handle): Feed
+	private function googleFeed(string $handle): Feed
 	{
-		$image = Asset::find()
-			->kind(Asset::KIND_IMAGE)
-			->one();
-
-		if (! $image instanceof Asset || $image->getUrl() === null) {
-			$this->markTestSkipped('This install has no image asset with a public URL.');
-		}
-
-		$feed = $this->makeFeed($handle, [
-			'platform' => Platform::Google->value,
-			'fieldMapping' => [
-				'title' => [
-					'source' => Mapping::build(Mapping::ELEMENT, 'product.title'),
-					'default' => '',
-				],
-				'link' => [
-					'source' => Mapping::build(Mapping::ELEMENT, 'product.url'),
-					'default' => '',
-				],
-				'description' => [
-					'source' => Mapping::USE_DEFAULT,
-					'default' => 'A description, so the item is not excluded.',
-				],
-				'image_link' => [
-					'source' => Mapping::USE_DEFAULT,
-					'default' => (string) $image->id,
-				],
-				'condition' => [
-					'source' => Mapping::USE_DEFAULT,
-					'default' => 'new',
-				],
-				'availability' => [
-					'source' => Mapping::USE_DEFAULT,
-					'default' => Availability::InStock->value,
-				],
+		return $this->buildableFeed($handle, Platform::Google, [
+			'condition' => [
+				'source' => Mapping::USE_DEFAULT,
+				'default' => 'new',
+			],
+			'availability' => [
+				'source' => Mapping::USE_DEFAULT,
+				'default' => Availability::InStock->value,
 			],
 		]);
-
-		$spec = FeedSpec::forPlatform($feed->getPlatform());
-		$source = FeedSource::forFeed($feed);
-
-		try {
-			$this->builds()->assertBuildable($feed, $spec, $source);
-		} catch (FeedBuildException $feedBuildException) {
-			$this->markTestSkipped('This install cannot build a variant feed: ' . $feedBuildException->getMessage());
-		}
-
-		if ($source->query()->count() === 0) {
-			$this->markTestSkipped('This install has no live variants to build a feed from.');
-		}
-
-		return $feed;
-	}
-
-	private function publishedXml(Feed $feed): string
-	{
-		$fs = $this->feeds()->getFs();
-		$path = $feed->getPath();
-
-		$this->assertTrue($fs->fileExists($path), 'The build published no artifact.');
-
-		$stream = $fs->getFileStream($path);
-		stream_filter_append($stream, 'zlib.inflate', STREAM_FILTER_READ, [
-			'window' => 31,
-		]);
-
-		$xml = (string) stream_get_contents($stream);
-		fclose($stream);
-
-		return $xml;
 	}
 }

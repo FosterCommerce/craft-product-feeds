@@ -17,7 +17,7 @@ class Settings extends Model
 	public int $batchSize = 500;
 
 	/**
-	 * The job's TTR, and how long a build may sit in `building` before `Feeds::isDue()` counts it as
+	 * The job's TTR, and how long a build may sit in `building` before `BuildQueue::isDue()` counts it as
 	 * stalled. Craft Cloud caps queue jobs at 15 minutes, so the TTR only applies to self-hosted sites.
 	 */
 	public int $buildTimeout = 3600;

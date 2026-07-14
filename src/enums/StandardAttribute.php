@@ -63,7 +63,7 @@ enum StandardAttribute: string
 	/**
 	 * Identical on every platform that has the concept.
 	 */
-	public const CONDITION_VALUES = ['new', 'refurbished', 'used'];
+	private const CONDITION_VALUES = ['new', 'refurbished', 'used'];
 
 	/**
 	 * @param int|null $maxLength the platform's own limit, where it is not the one Google publishes

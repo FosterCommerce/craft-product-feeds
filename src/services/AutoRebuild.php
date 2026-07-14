@@ -13,6 +13,7 @@ use craft\elements\conditions\NotRelatedToConditionRule;
 use craft\elements\conditions\RelatedToConditionRule;
 use craft\elements\Entry;
 use craft\fields\BaseRelationField;
+use fostercommerce\productfeeds\enums\ElementChange;
 use fostercommerce\productfeeds\helpers\Mapping;
 use fostercommerce\productfeeds\models\Feed;
 use fostercommerce\productfeeds\models\WatchedFields;
@@ -51,7 +52,7 @@ class AutoRebuild extends Component
 	 */
 	public function onSave(ElementInterface $element, bool $isNew): void
 	{
-		$this->handle($element, false, $isNew);
+		$this->queueBuildsFor($element, $isNew ? ElementChange::Created : ElementChange::Updated);
 	}
 
 	/**
@@ -59,7 +60,7 @@ class AutoRebuild extends Component
 	 */
 	public function onRestore(ElementInterface $element): void
 	{
-		$this->handle($element, false, true);
+		$this->queueBuildsFor($element, ElementChange::Created);
 	}
 
 	/**
@@ -67,16 +68,19 @@ class AutoRebuild extends Component
 	 */
 	public function onDelete(ElementInterface $element): void
 	{
-		$this->handle($element, true, false);
+		$this->queueBuildsFor($element, ElementChange::Deleted);
 	}
 
 	/**
+	 * Queues a build of every enabled feed this element belongs to.
+	 *
 	 * @throws InvalidConfigException
 	 */
-	private function handle(ElementInterface $element, bool $deleting, bool $reappearing): void
+	private function queueBuildsFor(ElementInterface $element, ElementChange $change): void
 	{
-		// Craft resaves the whole catalog after a field layout edit, which would cost a membership
-		// query per element per feed and republish an unchanged feed.
+		// Drafts, revisions and propagated saves are not the live element. `resaving` is Craft re-saving the
+		// whole catalog after a field layout edit: a membership query per element per feed, and a republish
+		// of a feed nothing changed in.
 		if ($element->getIsDraft() || $element->getIsRevision() || $element->isProvisionalDraft || $element->propagating || $element->resaving) {
 			return;
 		}
@@ -85,24 +89,22 @@ class AutoRebuild extends Component
 			return;
 		}
 
-		/** @var ProductFeeds $plugin */
-		$plugin = ProductFeeds::getInstance();
-		$feeds = $plugin->getFeeds();
+		$buildQueue = ProductFeeds::plugin()->getBuildQueue();
 
 		foreach ($this->enabledFeeds() as $feed) {
 			// A queued build has not started, so it will read this change when it runs.
-			if ($feeds->isBuildPending((int) $feed->id)) {
+			if ($buildQueue->isBuildPending((int) $feed->id)) {
 				continue;
 			}
 
 			try {
 				$source = FeedSource::forFeed($feed);
-				if ($source->reads($element) && $this->shouldRebuild($feed, $source, $element, $deleting, $reappearing)) {
-					$feeds->requestBuild((int) $feed->id);
+				if ($source->handles($element) && $this->shouldRebuild($feed, $source, $element, $change)) {
+					$buildQueue->requestBuild((int) $feed->id);
 				}
 			} catch (Throwable $throwable) {
-				// One feed whose mapping or filter can no longer be resolved must not fail the save that
-				// triggered this, nor stop the feeds after it from rebuilding. It rebuilds on its interval.
+				// A feed whose mapping or filter no longer resolves must not fail the save, nor block the feeds
+				// after it. It rebuilds on its interval instead.
 				Craft::error(sprintf(
 					'Product feed “%s” auto-rebuild check failed: %s',
 					$feed->handle,
@@ -119,8 +121,7 @@ class AutoRebuild extends Component
 	private function enabledFeeds(): array
 	{
 		if ($this->enabledFeeds === null) {
-			/** @var ProductFeeds $plugin */
-			$plugin = ProductFeeds::getInstance();
+			$plugin = ProductFeeds::plugin();
 			$this->enabledFeeds = $plugin->getFeeds()->getEnabledFeeds();
 		}
 
@@ -130,40 +131,36 @@ class AutoRebuild extends Component
 	/**
 	 * @throws InvalidConfigException
 	 */
-	private function shouldRebuild(Feed $feed, FeedSource $source, ElementInterface $element, bool $deleting, bool $isNew): bool
+	private function shouldRebuild(Feed $feed, FeedSource $source, ElementInterface $element, ElementChange $change): bool
 	{
-		if ($deleting) {
-			return $source->mightRead($element);
+		if ($change === ElementChange::Deleted) {
+			return $source->mightContain($element);
 		}
 
-		if ($isNew) {
-			return $source->inScope($element);
+		// A created element has no edit to judge, so membership is the whole question.
+		if ($change === ElementChange::Created) {
+			return $source->contains($element);
 		}
 
 		$watched = $this->watchedFields($feed);
-		$filterDirty = $this->dirtyField($element, $watched->filter)
-			|| ($watched->hasRelationRule && $this->dirtyRelation($element));
 
-		if (! $this->relevantEdit($element, $watched->mapped, $filterDirty)) {
-			return false;
-		}
-
-		if ($source->inScope($element)) {
+		// The filter reads different values now, so the element may have just joined or left the feed.
+		// Either way it has to rebuild, whether or not the element is still in scope.
+		if (
+			$this->hasDirtyField($element, $watched->filter)
+			|| ($watched->hasRelationRule && $this->hasDirtyRelation($element))
+		) {
 			return true;
 		}
 
-		return $filterDirty;
+		return $this->hasRelevantEdit($element, $watched->mapped) && $source->contains($element);
 	}
 
 	/**
 	 * @param list<string> $mappedHandles
 	 */
-	private function relevantEdit(ElementInterface $element, array $mappedHandles, bool $filterDirty): bool
+	private function hasRelevantEdit(ElementInterface $element, array $mappedHandles): bool
 	{
-		if ($filterDirty) {
-			return true;
-		}
-
 		// Commerce does not set dirty attributes on a Variant, so a price or SKU edit reports none, and a
 		// Product's are its own record's. Any purchasable save counts instead.
 		if ($element instanceof Variant || $element instanceof Product) {
@@ -175,18 +172,18 @@ class AutoRebuild extends Component
 			return true;
 		}
 
-		return $this->dirtyField($element, $mappedHandles);
+		return $this->hasDirtyField($element, $mappedHandles);
 	}
 
 	/**
 	 * @param list<string> $handles
 	 */
-	private function dirtyField(ElementInterface $element, array $handles): bool
+	private function hasDirtyField(ElementInterface $element, array $handles): bool
 	{
 		return $handles !== [] && array_intersect($element->getDirtyFields(), $handles) !== [];
 	}
 
-	private function dirtyRelation(ElementInterface $element): bool
+	private function hasDirtyRelation(ElementInterface $element): bool
 	{
 		$layout = $element->getFieldLayout();
 		foreach ($element->getDirtyFields() as $handle) {

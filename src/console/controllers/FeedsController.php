@@ -4,8 +4,8 @@ declare(strict_types=1);
 
 namespace fostercommerce\productfeeds\console\controllers;
 
-use Craft;
 use craft\console\Controller;
+use fostercommerce\productfeeds\models\BuildResult;
 use fostercommerce\productfeeds\ProductFeeds;
 use Throwable;
 use yii\base\InvalidConfigException;
@@ -42,62 +42,64 @@ class FeedsController extends Controller
 	 */
 	public function actionBuild(): int
 	{
-		/** @var ProductFeeds $plugin */
-		$plugin = ProductFeeds::getInstance();
+		$plugin = ProductFeeds::plugin();
 
-		$feeds = $plugin->getFeeds();
+		$feedsService = $plugin->getFeeds();
+		$buildQueue = $plugin->getBuildQueue();
 
 		if ($this->feed === null && ! $this->all) {
-			$this->stdout(sprintf("Queued %d due feed(s).\n", $feeds->enqueueDueBuilds()));
+			$this->stdout(sprintf("Queued %d due feed(s).\n", $buildQueue->enqueueDueBuilds()));
 
 			return ExitCode::OK;
 		}
 
-		$targets = $this->feed === null
-			? $feeds->getEnabledFeeds()
-			: array_values(array_filter($feeds->getAllFeeds(), fn ($feed): bool => $feed->handle === $this->feed));
+		$feeds = $this->feed === null
+			? $feedsService->getEnabledFeeds()
+			: $feedsService->getFeedsByHandle($this->feed);
 
-		if ($targets === []) {
+		if ($feeds === []) {
 			$this->stderr("No matching feeds.\n");
 
 			return ExitCode::DATAERR;
 		}
 
-		$mutex = Craft::$app->getMutex();
+		// One feed failing must not take the rest of the run down with it. The command exits on the worst
+		// outcome across all feeds.
+		$exitCode = ExitCode::OK;
 
-		foreach ($targets as $target) {
+		foreach ($feeds as $feed) {
 			if (! $this->inline) {
-				$feeds->requestBuild((int) $target->id);
-				$this->stdout(sprintf("Queued “%s”.\n", $target->name));
+				$buildQueue->requestBuild((int) $feed->id);
+				$this->stdout(sprintf("Queued “%s”.\n", $feed->name));
 				continue;
 			}
 
-			$lockName = $feeds->buildLockName($target);
-			if (! $mutex->acquire($lockName)) {
-				$this->stderr(sprintf("Already building “%s”.\n", $target->name));
-
-				return ExitCode::TEMPFAIL;
-			}
-
 			try {
-				$result = $plugin->getBuilds()->buildAndRecord($target);
-				$this->stdout(sprintf(
-					"Built “%s”: %d items, %d skipped.\n",
-					$target->name,
-					$result->itemCount,
-					$result->skippedCount()
-				));
+				$result = $plugin->getBuilds()->buildUnderLock($feed);
 			} catch (Throwable $buildException) {
-				$this->stderr(sprintf("Failed “%s”: %s\n", $target->name, $buildException->getMessage()));
-
-				return ExitCode::UNSPECIFIED_ERROR;
-			} finally {
-				$mutex->release($lockName);
+				$this->stderr(sprintf("Failed “%s”: %s\n", $feed->name, $buildException->getMessage()));
+				$exitCode = ExitCode::UNSPECIFIED_ERROR;
+				continue;
 			}
 
-			$feeds->requestBuildIfDirty((int) $target->id);
+			if (! $result instanceof BuildResult) {
+				$this->stderr(sprintf("Already building “%s”.\n", $feed->name));
+
+				if ($exitCode === ExitCode::OK) {
+					$exitCode = ExitCode::TEMPFAIL;
+				}
+
+				continue;
+			}
+
+			$this->stdout(sprintf(
+				"Built “%s”: %d items, %d skipped.\n",
+				$feed->name,
+				$result->itemCount,
+				$result->buildDiagnostics->skippedCount()
+			));
 		}
 
-		return ExitCode::OK;
+		return $exitCode;
 	}
 }

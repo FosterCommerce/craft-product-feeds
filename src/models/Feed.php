@@ -32,6 +32,11 @@ use fostercommerce\productfeeds\sources\FeedSource;
 use Money\Currency;
 use yii\base\InvalidConfigException;
 
+/**
+ * A feed.
+ *
+ * `Cp::componentStatusLabelHtml()` requires `Statusable`; the index table uses it for the enabled badge.
+ */
 class Feed extends Model implements Statusable
 {
 	/**
@@ -106,6 +111,8 @@ class Feed extends Model implements Statusable
 
 	public ?string $uid = null;
 
+	private ?FeedSpec $spec = null;
+
 	public function init(): void
 	{
 		parent::init();
@@ -164,76 +171,129 @@ class Feed extends Model implements Statusable
 		return $this->enabled ? Element::STATUS_ENABLED : Element::STATUS_DISABLED;
 	}
 
+	public function getCpEditUrl(): string
+	{
+		return UrlHelper::cpUrl('product-feeds/' . $this->id);
+	}
+
 	public function getSpec(): FeedSpec
 	{
-		return FeedSpec::forPlatform($this->getPlatform());
+		// A spec parses its attributes once and remembers them, so a fresh one per call would reparse them.
+		return $this->spec ??= FeedSpec::forPlatform($this->getPlatform());
+	}
+
+	/**
+	 * Named by token, not by handle: the token is what the public route resolves a feed by. Not
+	 * timestamped, so a build overwrites its predecessor rather than piling up.
+	 */
+	public function getFileName(): string
+	{
+		return sprintf('%s.%s.gz', $this->token, $this->getSpec()->fileExtension());
+	}
+
+	public function getExcludedReportFileName(): string
+	{
+		return sprintf('%s-excluded.csv', $this->token);
 	}
 
 	/**
 	 * Where the artifact lives on the filesystem. Never public: the feed is served through the plugin's
-	 * own route, which carries the handle and token rather than this path.
-	 *
-	 * Not timestamped, so a build overwrites its predecessor rather than accumulating artifacts.
+	 * own route.
 	 */
 	public function getPath(): string
 	{
-		return sprintf('%s/%s.%s.gz', ProductFeeds::FILE_PREFIX, $this->token, $this->getSpec()->fileExtension());
+		return sprintf('%s/%s', ProductFeeds::FILE_PREFIX, $this->getFileName());
 	}
 
 	public function getExcludedReportPath(): string
 	{
-		return sprintf('%s/%s-excluded.csv', ProductFeeds::FILE_PREFIX, $this->token);
+		return sprintf('%s/%s', ProductFeeds::FILE_PREFIX, $this->getExcludedReportFileName());
+	}
+
+	/**
+	 * The path the site route serves the feed from. The token identifies the feed; the handle is there
+	 * to make the URL readable.
+	 */
+	public function getUrlPath(): string
+	{
+		return sprintf('%s/%s-%s', ProductFeeds::FILE_PREFIX, $this->handle, $this->getFileName());
+	}
+
+	/**
+	 * Where an attribute reads its value from. An unmapped gallery falls back to the images the main
+	 * image left over; every other unmapped attribute is left out of the feed.
+	 */
+	public function mappingSource(string $attribute, FeedSpec $spec): string
+	{
+		return $this->fieldMapping[$attribute]['source'] ?? ($attribute === $spec->galleryAttribute()
+			? Mapping::IMAGE_OVERFLOW
+			: Mapping::NO_INCLUDE);
+	}
+
+	/**
+	 * The value an attribute falls back to when its source resolves to nothing. An asset ID for an
+	 * image attribute, the value itself for the rest.
+	 */
+	public function mappingDefault(string $attribute): string
+	{
+		return trim($this->fieldMapping[$attribute]['default'] ?? '');
 	}
 
 	/**
 	 * Checks each default against its attribute: an enumerated attribute against the platform's
 	 * vocabulary, the rest for shape.
 	 */
-	public function validateFieldMapping(string $attribute): void
+	public function validateFieldMapping(string $modelAttribute): void
 	{
-		$spec = FeedSpec::forPlatform($this->getPlatform());
+		// Yii runs every rule whatever the ones before it found, and `getSpec()` resolves the platform
+		// through an enum that throws on the value the `in` rule has already rejected.
+		if ($this->hasErrors('platform')) {
+			return;
+		}
+
+		$spec = $this->getSpec();
 
 		foreach ($spec->attributes() as $name => $attributeDefinition) {
-			$default = trim($this->fieldMapping[$name]['default'] ?? '');
+			$default = $this->mappingDefault($name);
 			if ($default === '') {
 				continue;
 			}
 
 			$error = $this->defaultValueError($attributeDefinition, $default);
 			if ($error !== null) {
-				$this->addError($attribute, $error);
+				$this->addError($modelAttribute, $error);
 			}
 		}
 	}
 
 	/**
-	 * Checks each mapping's source is one the dropdown would have offered for that attribute's kind.
-	 *
-	 * Only the browser enforced it, so without this `image_link` could be pointed at a text field, and
-	 * both the build and the image test would fetch whatever the field holds as a URL. A handle on no
-	 * layout at all is left alone: it resolves to a blank, as a field removed from a product type does.
+	 * Checks each mapping's source is one the dropdown would have offered for that attribute's kind. Only
+	 * the browser enforced it, so without this `image_link` could point at a text field and the build
+	 * would fetch whatever it holds. A handle on no layout is left alone: it resolves to a blank.
 	 *
 	 * @throws InvalidConfigException
 	 */
-	public function validateFieldMappingSources(string $attribute): void
+	public function validateFieldMappingSources(string $modelAttribute): void
 	{
-		if ($this->siteId === null) {
+		// As in `validateFieldMapping()`: `FeedSource::forFeed()` resolves the source through an enum that
+		// throws on a value the `in` rules have already rejected.
+		if ($this->siteId === null || $this->hasErrors('platform') || $this->hasErrors('source')) {
 			return;
 		}
 
-		$spec = FeedSpec::forPlatform($this->getPlatform());
+		$spec = $this->getSpec();
 		$source = FeedSource::forFeed($this);
 		$layoutsByPrefix = $source->fieldLayouts();
 
 		foreach ($spec->attributes() as $name => $attributeDefinition) {
-			$parsed = Mapping::parse($this->fieldMapping[$name]['source'] ?? Mapping::NO_INCLUDE);
+			$parsed = Mapping::parse($this->mappingSource($name, $spec));
 			if (! in_array($parsed['kind'], [Mapping::FIELD, Mapping::PRODUCT_FIELD], true)) {
 				continue;
 			}
 
 			$field = $this->fieldOnLayouts($layoutsByPrefix[$parsed['kind']] ?? [], $parsed['value']);
 			if ($field instanceof FieldInterface && ! $attributeDefinition->attributeKind->acceptsField($field)) {
-				$this->addError($attribute, Craft::t(ProductFeeds::HANDLE, 'error.mappingSourceNotAllowed', [
+				$this->addError($modelAttribute, Craft::t(ProductFeeds::HANDLE, 'error.mappingSourceNotAllowed', [
 					'attribute' => $name,
 					'field' => $field->name,
 				]));
@@ -247,11 +307,30 @@ class Feed extends Model implements Statusable
 	protected function defineRules(): array
 	{
 		return [
+			// Ahead of the mapping validators: both resolve the platform and the source through the enums,
+			// which throw on a value these rules are here to reject.
+			[
+				['platform'],
+				'in',
+				'range' => Platform::values(),
+			],
+			[
+				['source'],
+				'in',
+				'range' => Source::values(),
+			],
 			[['fieldMapping'], 'validateFieldMapping'],
 			[['fieldMapping'], 'validateFieldMappingSources'],
 			[['name', 'handle', 'platform', 'source', 'siteId', 'token'], 'required'],
 			[['name', 'handle', 'token', 'imageEngine', 'imageTransform', 'imageFit', 'lastBuildError'], 'string'],
-			[['imageWidth', 'imageHeight'], 'integer'],
+			[['name', 'handle', 'imageEngine', 'imageTransform', 'imageFit'],
+				'string',
+				'max' => 255],
+			// `smallInteger()->unsigned()`, and Postgres ignores the unsigned, so 32767 is the portable ceiling.
+			[['imageWidth', 'imageHeight'],
+				'integer',
+				'min' => 1,
+				'max' => 32767],
 			[['handle'], HandleValidator::class],
 			[
 				['handle'],
@@ -264,33 +343,18 @@ class Feed extends Model implements Statusable
 				'string',
 				'length' => self::TOKEN_LENGTH],
 			[
-				['platform'],
-				'in',
-				'range' => array_map(static fn (Platform $case): string => $case->value, Platform::cases()),
-			],
-			[
-				['source'],
-				'in',
-				'range' => array_map(static fn (Source $case): string => $case->value, Source::cases()),
-			],
-			[
-				['lastBuildStatus'],
-				'in',
-				'range' => array_map(static fn (BuildStatus $case): string => $case->value, BuildStatus::cases()),
-			],
-			[
 				['imageEngine'],
 				'in',
-				'range' => array_map(static fn (ImageEngine $case): string => $case->value, ImageEngine::cases()),
+				'range' => ImageEngine::values(),
 			],
 			[
 				['imageFit'],
 				'in',
-				'range' => array_map(static fn (ImageFit $case): string => $case->value, ImageFit::cases()),
+				'range' => ImageFit::values(),
 			],
-			[['siteId', 'sortOrder', 'lastBuildItemCount', 'lastBuildSkippedCount', 'lastBuildBytes', 'lastBuildBytesUncompressed'], 'integer'],
+			[['siteId', 'sortOrder'], 'integer'],
 			[['enabled'], 'boolean'],
-			[['sourceIds', 'fieldMapping', 'filterCondition', 'lastBuildStartedAt', 'lastBuildFinishedAt'], 'safe'],
+			[['sourceIds', 'fieldMapping', 'filterCondition'], 'safe'],
 		];
 	}
 
@@ -332,14 +396,14 @@ class Feed extends Model implements Statusable
 
 		$kind = $attributeDefinition->attributeKind;
 
-		if ($kind === AttributeKind::Money && ! is_numeric($default)) {
+		if (($kind === AttributeKind::Money || $kind === AttributeKind::Number) && ! is_numeric($default)) {
 			return Craft::t(ProductFeeds::HANDLE, 'error.defaultNotNumeric', [
 				'attribute' => $attributeDefinition->name,
 				'value' => $default,
 			]);
 		}
 
-		if (($kind === AttributeKind::Url || $kind === AttributeKind::Image) && ! UrlHelper::isAbsoluteUrl($default)) {
+		if ($kind === AttributeKind::Url && ! UrlHelper::isAbsoluteUrl($default)) {
 			return Craft::t(ProductFeeds::HANDLE, 'error.defaultNotAbsoluteUrl', [
 				'attribute' => $attributeDefinition->name,
 				'value' => $default,

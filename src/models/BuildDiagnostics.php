@@ -5,8 +5,7 @@ declare(strict_types=1);
 namespace fostercommerce\productfeeds\models;
 
 /**
- * What a build noticed while it ran: what it left out, and what came through blank or unusable. The
- * mapping screen reads this back to tell the admin which rows are pulling their weight.
+ * What a build left out, and what came through blank or unusable. The mapping screen reads it back.
  *
  * Written as the build streams, so it is mutable.
  */
@@ -55,12 +54,12 @@ final class BuildDiagnostics
 		$this->invalidByAttribute[$attribute] = ($this->invalidByAttribute[$attribute] ?? 0) + 1;
 	}
 
-	public function sampleSkipped(int $elementId, string $attribute): void
+	public function recordSkippedSample(int $elementId, string $reason): void
 	{
 		if (count($this->sampleSkipped) < self::SAMPLE_LIMIT) {
 			$this->sampleSkipped[] = [
 				'id' => $elementId,
-				'reason' => $attribute,
+				'reason' => $reason,
 			];
 		}
 	}

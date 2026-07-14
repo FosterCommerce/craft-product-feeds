@@ -66,7 +66,7 @@ final class Mapping
 	/**
 	 * @return array<string, array{source: string, default: string}>
 	 */
-	public static function rows(mixed $value): array
+	public static function normalizeRows(mixed $value): array
 	{
 		if (! is_array($value)) {
 			return [];

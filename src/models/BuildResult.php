@@ -18,9 +18,4 @@ final readonly class BuildResult
 		public BuildDiagnostics $buildDiagnostics,
 	) {
 	}
-
-	public function skippedCount(): int
-	{
-		return $this->buildDiagnostics->skippedCount();
-	}
 }

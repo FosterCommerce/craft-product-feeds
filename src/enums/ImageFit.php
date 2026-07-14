@@ -13,6 +13,8 @@ use fostercommerce\productfeeds\ProductFeeds;
  */
 enum ImageFit: string
 {
+	use EnumValuesTrait;
+
 	case Crop = 'crop';
 
 	case Fit = 'fit';

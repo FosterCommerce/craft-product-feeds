@@ -72,6 +72,21 @@ class FeedValueTest extends TestCase
 	}
 
 	/**
+	 * `is_numeric()` accepts a leading `+` and exponent notation, which MoneyPHP's decimal parser
+	 * rejects by throwing. One unparseable price has to become a blank that skips the item, not an
+	 * exception that fails the whole build. A large float stringifies to exponent form, so this is the
+	 * value a real catalog produces.
+	 */
+	public function testAmountsOutsideTheDecimalGrammarYieldNothing(): void
+	{
+		$currency = new Currency('USD');
+
+		$this->assertNull(FeedValue::moneyFromDecimal('+19.99', $currency));
+		$this->assertNull(FeedValue::moneyFromDecimal('1e3', $currency));
+		$this->assertNull(FeedValue::moneyFromDecimal((string) 1.0E+16, $currency));
+	}
+
+	/**
 	 * Money values must not be stripped or truncated the way prose is.
 	 */
 	public function testMoneyKindPassesValuesThroughUntouched(): void
@@ -170,6 +185,16 @@ class FeedValueTest extends TestCase
 	{
 		$this->assertSame('https://example.test:8080/a.jpg', FeedValue::encodeUrl('https://example.test:8080/a.jpg'));
 		$this->assertSame('https://example.test/caf%C3%A9.jpg', FeedValue::encodeUrl('https://example.test/café.jpg'));
+	}
+
+	/**
+	 * `parse_url()` splits userinfo off the host, so an image URL that authenticates has to be
+	 * reassembled with it or the platform's crawler is refused and the item disapproved.
+	 */
+	public function testCredentialsSurvive(): void
+	{
+		$this->assertSame('https://user:pass@cdn.example.test/img.jpg', FeedValue::encodeUrl('https://user:pass@cdn.example.test/img.jpg'));
+		$this->assertSame('https://user@cdn.example.test/img.jpg', FeedValue::encodeUrl('https://user@cdn.example.test/img.jpg'));
 	}
 
 	/**
