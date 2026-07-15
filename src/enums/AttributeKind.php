@@ -43,14 +43,20 @@ enum AttributeKind: string
 			self::Url => $field instanceof PlainText,
 			self::Money, self::Number => $field instanceof Number || $field instanceof PlainText,
 			self::CategoryPath => $field instanceof Categories || $field instanceof PlainText,
-			default => $field instanceof PlainText
-				|| $field instanceof Number
-				|| $field instanceof Dropdown
-				|| $field instanceof RadioButtons
-				|| $field instanceof Checkboxes
-				|| $field instanceof Lightswitch
-				|| $field instanceof Email
-				|| $field instanceof Categories,
+			self::Text, self::LongText => self::acceptsTextField($field) || is_a($field, 'craft\ckeditor\Field'),
+			default => self::acceptsTextField($field),
 		};
+	}
+
+	private static function acceptsTextField(FieldInterface $field): bool
+	{
+		return $field instanceof PlainText
+			|| $field instanceof Number
+			|| $field instanceof Dropdown
+			|| $field instanceof RadioButtons
+			|| $field instanceof Checkboxes
+			|| $field instanceof Lightswitch
+			|| $field instanceof Email
+			|| $field instanceof Categories;
 	}
 }

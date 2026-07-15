@@ -7,6 +7,7 @@ namespace fostercommerce\productfeeds\sources;
 use Craft;
 use craft\base\ElementInterface;
 use craft\base\FieldInterface;
+use craft\base\RelationalFieldInterface;
 use craft\elements\conditions\ElementCondition;
 use craft\elements\db\ElementQueryInterface;
 use craft\models\FieldLayout;
@@ -283,20 +284,25 @@ abstract class FeedSource
 	 */
 	protected function eagerLoadPaths(): array
 	{
+		$layoutsByKind = $this->fieldLayouts();
 		$paths = [];
 
 		foreach ($this->feed->fieldMapping as $mapping) {
 			$parsed = Mapping::parse($mapping['source']);
+			$kind = $parsed['kind'];
 
-			$path = match ($parsed['kind']) {
-				Mapping::FIELD => $parsed['value'],
-				Mapping::PRODUCT_FIELD => 'product.' . $parsed['value'],
-				default => null,
-			};
-
-			if ($path !== null) {
-				$paths[] = $path;
+			if ($kind !== Mapping::FIELD && $kind !== Mapping::PRODUCT_FIELD) {
+				continue;
 			}
+
+			// Eager-loading a CKEditor field replaces its FieldData with an empty nested-entry collection.
+			if (! $this->isRelationField($layoutsByKind[$kind] ?? [], $parsed['value'])) {
+				continue;
+			}
+
+			$paths[] = $kind === Mapping::PRODUCT_FIELD
+				? 'product.' . $parsed['value']
+				: $parsed['value'];
 		}
 
 		return array_values(array_unique($paths));
@@ -317,6 +323,20 @@ abstract class FeedSource
 		}
 
 		return FilterCondition::fromConfig($this->conditionElementType(), $this->feed->filterCondition);
+	}
+
+	/**
+	 * @param FieldLayout[] $layouts
+	 */
+	private function isRelationField(array $layouts, string $handle): bool
+	{
+		foreach ($layouts as $layout) {
+			if ($layout->getFieldByHandle($handle) instanceof RelationalFieldInterface) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	private function imageTransform(): ImageTransform
