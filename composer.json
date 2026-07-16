@@ -1,7 +1,7 @@
 {
 	"name": "fostercommerce/product-feeds",
 	"description": "Build auto-updating product feeds for shopping and social platforms from Craft Commerce variants or Craft entries.",
-	"homepage": "https://github.com/fostercommerce/product-feeds",
+	"homepage": "https://github.com/FosterCommerce/craft-product-feeds",
 	"type": "craft-plugin",
 	"keywords": [
 		"craft",
@@ -19,10 +19,10 @@
 	"license": "proprietary",
 	"support": {
 		"email": "support@fostercommerce.com",
-		"issues": "https://github.com/fostercommerce/product-feeds/issues?state=open",
-		"source": "https://github.com/fostercommerce/product-feeds",
-		"docs": "https://github.com/fostercommerce/product-feeds/tree/main/docs",
-		"rss": "https://github.com/fostercommerce/product-feeds/releases.atom"
+		"issues": "https://github.com/FosterCommerce/craft-product-feeds/issues?state=open",
+		"source": "https://github.com/FosterCommerce/craft-product-feeds",
+		"docs": "https://github.com/FosterCommerce/craft-product-feeds/tree/main/docs",
+		"rss": "https://github.com/FosterCommerce/craft-product-feeds/releases.atom"
 	},
 	"authors": [
 		{
@@ -62,7 +62,7 @@
 		"class": "fostercommerce\\productfeeds\\ProductFeeds",
 		"name": "Product Feeds",
 		"developer": "Foster Commerce",
-		"documentationUrl": "https://github.com/fostercommerce/product-feeds/tree/main/docs"
+		"documentationUrl": "https://github.com/FosterCommerce/craft-product-feeds/tree/main/docs"
 	},
 	"config": {
 		"allow-plugins": {
