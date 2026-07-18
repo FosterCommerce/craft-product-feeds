@@ -30,6 +30,7 @@ use fostercommerce\productfeeds\ProductFeeds;
 use fostercommerce\productfeeds\records\Feed as FeedRecord;
 use fostercommerce\productfeeds\sources\FeedSource;
 use Money\Currency;
+use yii\base\Exception;
 use yii\base\InvalidConfigException;
 
 /**
@@ -217,6 +218,14 @@ class Feed extends Model implements Statusable
 	public function getUrlPath(): string
 	{
 		return sprintf('%s/%s-%s', ProductFeeds::FILE_PREFIX, $this->handle, $this->getFileName());
+	}
+
+	/**
+	 * @throws Exception if the feed names a site that no longer exists
+	 */
+	public function getSiteBaseUrl(): string
+	{
+		return UrlHelper::siteUrl('', null, null, $this->siteId);
 	}
 
 	/**

@@ -125,6 +125,8 @@ return [
 	'mapping.blankItems' => 'Blank on {n} items',
 	'mapping.setOnAllItems' => 'Set on all {n} items',
 	'mapping.nonPositivePrice' => '{n} items priced at zero or less',
+	'mapping.relativeUrls' => 'Dropped a value that isn’t an absolute URL on {n} items.',
+	'mapping.unresolvedImageUrls' => 'Dropped an image URL the site couldn’t resolve on {n} items. Check the site’s base URL.',
 	'mapping.docLink' => '{platform} documentation',
 	'mapping.identifierExistsNotice' => 'When brand, gtin and mpn are all blank on an item, the feed sends identifier_exists=no.',
 	'mapping.klaviyoNotice' => 'Klaviyo names its own fields with a $ prefix, so id is published as $id. Add the feed’s URL to Klaviyo as a Catalog Source, then map each field there.',

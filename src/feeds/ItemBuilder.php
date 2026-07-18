@@ -179,7 +179,24 @@ final readonly class ItemBuilder
 
 		$kind = $attributeDefinition->attributeKind;
 		if ($kind === AttributeKind::Url || $kind === AttributeKind::Image) {
-			return array_values(array_filter($values, static fn (string $url): bool => UrlHelper::isAbsoluteUrl($url)));
+			$absolute = [];
+			$firstDropped = null;
+
+			foreach ($values as $value) {
+				if (UrlHelper::isAbsoluteUrl($value)) {
+					$absolute[] = $value;
+				} else {
+					$firstDropped ??= $value;
+				}
+			}
+
+			// Counted once per item, matching the blank count it sits beside in the CP. Reported apart from a
+			// blank because a value that would not resolve looks identical downstream to an unmapped attribute.
+			if ($firstDropped !== null) {
+				$this->buildDiagnostics->countRelativeUrl($attributeDefinition->name, $firstDropped);
+			}
+
+			return $absolute;
 		}
 
 		return $values;

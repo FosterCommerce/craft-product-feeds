@@ -11,6 +11,7 @@ use craft\elements\db\ElementQueryInterface;
 use craft\elements\ElementCollection;
 use craft\helpers\MoneyHelper;
 use craft\helpers\StringHelper;
+use craft\helpers\UrlHelper;
 use DateTimeInterface;
 use fostercommerce\productfeeds\enums\AttributeKind;
 use fostercommerce\productfeeds\models\ImageTransform;
@@ -32,6 +33,15 @@ final class FeedValue
 	 * @var array<int, string>
 	 */
 	private array $categoryPaths = [];
+
+	/**
+	 * Takes the site's base URL rather than calling `UrlHelper::siteUrl()` itself, so the class stays
+	 * constructible without a booted Craft app and the unit suite can keep covering it.
+	 */
+	public function __construct(
+		private readonly string $siteBaseUrl,
+	) {
+	}
 
 	public static function money(Money $money): string
 	{
@@ -78,7 +88,15 @@ final class FeedValue
 			static fn (string $item): bool => $item !== ''
 		));
 
-		if ($kind === AttributeKind::Url || $kind === AttributeKind::Image) {
+		// Only an image value is safe to absolutize blind: every one is asset-derived. A URL value is
+		// hand-typed or plugin-supplied, so free text in a PlainText field would resolve to a live link.
+		// This runs after the blank filter and before `encodeUrl()`: a blank would otherwise resolve to
+		// the site's origin, and `encodeUrl()` leaves a relative URL untouched.
+		if ($kind === AttributeKind::Image) {
+			return array_map(fn (string $item): string => self::encodeUrl($this->absolutize($item)), $values);
+		}
+
+		if ($kind === AttributeKind::Url) {
 			return array_map(static fn (string $item): string => self::encodeUrl($item), $values);
 		}
 
@@ -120,6 +138,39 @@ final class FeedValue
 			$path,
 			isset($parts['query']) ? '?' . $parts['query'] : ''
 		);
+	}
+
+	/**
+	 * Resolves against the site's origin rather than through `UrlHelper::siteUrl()`, which joins against
+	 * the site's full base URL and would splice a subdirectory site's path into every asset URL.
+	 *
+	 * A feed is not served from a containing page, so a document-relative value has no referent and is
+	 * resolved as root-relative.
+	 */
+	private function absolutize(string $url): string
+	{
+		if (UrlHelper::isAbsoluteUrl($url)) {
+			return $url;
+		}
+
+		$base = parse_url($this->siteBaseUrl);
+
+		if (! isset($base['scheme'], $base['host'])) {
+			return $url;
+		}
+
+		if (UrlHelper::isProtocolRelativeUrl($url)) {
+			return $base['scheme'] . ':' . $url;
+		}
+
+		$origin = sprintf(
+			'%s://%s%s',
+			$base['scheme'],
+			$base['host'],
+			isset($base['port']) ? ':' . $base['port'] : ''
+		);
+
+		return $origin . '/' . ltrim($url, '/');
 	}
 
 	/**

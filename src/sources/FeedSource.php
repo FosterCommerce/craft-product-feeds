@@ -21,6 +21,7 @@ use fostercommerce\productfeeds\helpers\Mapping;
 use fostercommerce\productfeeds\models\Feed;
 use fostercommerce\productfeeds\models\ImageTransform;
 use Throwable;
+use yii\base\Exception;
 use yii\base\InvalidConfigException;
 
 /**
@@ -38,10 +39,13 @@ abstract class FeedSource
 
 	private readonly FeedValue $feedValue;
 
+	/**
+	 * @throws Exception if the feed names a site that no longer exists
+	 */
 	public function __construct(
 		protected readonly Feed $feed,
 	) {
-		$this->feedValue = new FeedValue();
+		$this->feedValue = new FeedValue($feed->getSiteBaseUrl());
 	}
 
 	public static function forFeed(Feed $feed): self
