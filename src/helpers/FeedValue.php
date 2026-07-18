@@ -35,8 +35,7 @@ final class FeedValue
 	private array $categoryPaths = [];
 
 	/**
-	 * Takes the site's base URL rather than calling `UrlHelper::siteUrl()` itself, so the class stays
-	 * constructible without a booted Craft app and the unit suite can keep covering it.
+	 * Injected, not read from `UrlHelper`, so the class constructs without a booted app.
 	 */
 	public function __construct(
 		private readonly string $siteBaseUrl,
@@ -88,10 +87,8 @@ final class FeedValue
 			static fn (string $item): bool => $item !== ''
 		));
 
-		// Only an image value is safe to absolutize blind: every one is asset-derived. A URL value is
-		// hand-typed or plugin-supplied, so free text in a PlainText field would resolve to a live link.
-		// This runs after the blank filter and before `encodeUrl()`: a blank would otherwise resolve to
-		// the site's origin, and `encodeUrl()` leaves a relative URL untouched.
+		// Image values are asset-derived; a URL value is hand-typed.
+		// After the blank filter (a blank resolves to the origin), before `encodeUrl()` (it ignores relatives).
 		if ($kind === AttributeKind::Image) {
 			return array_map(fn (string $item): string => self::encodeUrl($this->absolutize($item)), $values);
 		}
@@ -141,11 +138,9 @@ final class FeedValue
 	}
 
 	/**
-	 * Resolves against the site's origin rather than through `UrlHelper::siteUrl()`, which joins against
-	 * the site's full base URL and would splice a subdirectory site's path into every asset URL.
+	 * `UrlHelper::siteUrl()` joins against the site's full base URL, splicing a subdirectory path in.
 	 *
-	 * A feed is not served from a containing page, so a document-relative value has no referent and is
-	 * resolved as root-relative.
+	 * A feed has no containing page, so a document-relative value is resolved as root-relative.
 	 */
 	private function absolutize(string $url): string
 	{

@@ -190,8 +190,7 @@ final readonly class ItemBuilder
 				}
 			}
 
-			// Counted once per item, matching the blank count it sits beside in the CP. Reported apart from a
-			// blank because a value that would not resolve looks identical downstream to an unmapped attribute.
+			// Separate from countBlank: a dropped relative URL leaves the attribute empty, same as unmapped.
 			if ($firstDropped !== null) {
 				$this->buildDiagnostics->countRelativeUrl($attributeDefinition->name, $firstDropped);
 			}

@@ -18,22 +18,22 @@ final class BuildDiagnostics
 	private const SAMPLE_LIMIT = 50;
 
 	/**
-	 * @var array<string, int> attribute that was required and blank => items it excluded
+	 * @var array<string, int>
 	 */
-	public array $skippedByReason = [];
+	public array $skippedByAttribute = [];
 
 	/**
-	 * @var array<string, int> mapped attribute => items its source produced nothing for
+	 * @var array<string, int>
 	 */
 	public array $blankByAttribute = [];
 
 	/**
-	 * @var array<string, int> money attribute => items priced at zero or less
+	 * @var array<string, int>
 	 */
 	public array $invalidByAttribute = [];
 
 	/**
-	 * @var array<string, int> URL or image attribute => items it dropped a non-absolute value on
+	 * @var array<string, int>
 	 */
 	public array $relativeUrlByAttribute = [];
 
@@ -43,10 +43,7 @@ final class BuildDiagnostics
 	public array $sampleSkipped = [];
 
 	/**
-	 * Keyed by attribute rather than a capped list, because the CP shows one example per attribute. A
-	 * list would let one attribute's drops crowd out another's before its first is recorded.
-	 *
-	 * @var array<string, string> attribute => the first URL it dropped
+	 * @var array<string, string>
 	 */
 	public array $sampleRelativeUrls = [];
 
@@ -54,7 +51,7 @@ final class BuildDiagnostics
 
 	public function countSkipped(string $attribute): void
 	{
-		$this->skippedByReason[$attribute] = ($this->skippedByReason[$attribute] ?? 0) + 1;
+		$this->skippedByAttribute[$attribute] = ($this->skippedByAttribute[$attribute] ?? 0) + 1;
 	}
 
 	public function countBlank(string $attribute): void
@@ -67,10 +64,6 @@ final class BuildDiagnostics
 		$this->invalidByAttribute[$attribute] = ($this->invalidByAttribute[$attribute] ?? 0) + 1;
 	}
 
-	/**
-	 * Counts and samples together: the count alone cannot name the offending URL, and the sample alone
-	 * cannot say how far the problem spreads.
-	 */
 	public function countRelativeUrl(string $attribute, string $url): void
 	{
 		$this->relativeUrlByAttribute[$attribute] = ($this->relativeUrlByAttribute[$attribute] ?? 0) + 1;
@@ -89,7 +82,7 @@ final class BuildDiagnostics
 
 	public function skippedCount(): int
 	{
-		return array_sum($this->skippedByReason);
+		return array_sum($this->skippedByAttribute);
 	}
 
 	/**
@@ -99,8 +92,8 @@ final class BuildDiagnostics
 	{
 		$diagnostics = new self();
 
-		/** @var array<string, int> $skippedByReason */
-		$skippedByReason = is_array($stored['skippedByReason'] ?? null) ? $stored['skippedByReason'] : [];
+		/** @var array<string, int> $skippedByAttribute */
+		$skippedByAttribute = is_array($stored['skippedByAttribute'] ?? null) ? $stored['skippedByAttribute'] : [];
 		/** @var array<string, int> $blankByAttribute */
 		$blankByAttribute = is_array($stored['blankByAttribute'] ?? null) ? $stored['blankByAttribute'] : [];
 		/** @var array<string, int> $invalidByAttribute */
@@ -112,7 +105,7 @@ final class BuildDiagnostics
 		/** @var array<string, string> $sampleRelativeUrls */
 		$sampleRelativeUrls = is_array($stored['sampleRelativeUrls'] ?? null) ? $stored['sampleRelativeUrls'] : [];
 
-		$diagnostics->skippedByReason = $skippedByReason;
+		$diagnostics->skippedByAttribute = $skippedByAttribute;
 		$diagnostics->blankByAttribute = $blankByAttribute;
 		$diagnostics->invalidByAttribute = $invalidByAttribute;
 		$diagnostics->relativeUrlByAttribute = $relativeUrlByAttribute;
@@ -131,7 +124,7 @@ final class BuildDiagnostics
 	public function toArray(): array
 	{
 		return [
-			'skippedByReason' => $this->skippedByReason,
+			'skippedByAttribute' => $this->skippedByAttribute,
 			'blankByAttribute' => $this->blankByAttribute,
 			'invalidByAttribute' => $this->invalidByAttribute,
 			'relativeUrlByAttribute' => $this->relativeUrlByAttribute,

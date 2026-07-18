@@ -46,10 +46,12 @@ What the last build noticed, and what the mapping screen reads back. Shaped by `
 
 | Key | Type | Notes |
 |---|---|---|
-| `skippedByReason` | object | Required attribute that came out blank, to the number of items it excluded. |
+| `skippedByAttribute` | object | Required attribute that came out blank, to the number of items it excluded. |
 | `blankByAttribute` | object | Mapped attribute, to the number of items its source produced nothing for. |
 | `invalidByAttribute` | object | Money attribute, to the number of items priced at zero or less. Those items stay in the feed. |
+| `relativeUrlByAttribute` | object | URL or image attribute, to the number of items it dropped a non-absolute value on. |
 | `sampleSkipped` | array | Up to 50 `{"id": 0, "reason": "..."}` entries, for the Excluded products panel. The CSV report on the feed filesystem carries the full set. |
+| `sampleRelativeUrls` | object | URL or image attribute, to the first non-absolute value it dropped. |
 | `urlCheck` | object | `{"status": 0, "contentType": "...", "error": null}` from the `HEAD` request sent after a successful build. Advisory. |
 
 ## Artifacts

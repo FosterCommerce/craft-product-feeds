@@ -114,8 +114,7 @@ final class FeedEditVariables
 			$mappingSource = $feed->mappingSource($name, $spec);
 			$blanks = $diagnostics->blankByAttribute[$name] ?? null;
 			$invalid = $diagnostics->invalidByAttribute[$name] ?? null;
-			// An image value is asset-derived and always absolutized, so the only way it drops is a site base
-			// URL that would not parse. A URL value is never absolutized, so its drops are the value itself.
+			// An image only drops on an unparseable site base URL; a URL value drops on the value itself.
 			$relativeUrls = $diagnostics->relativeUrlByAttribute[$name] ?? null;
 			$relativeUrlMessage = $relativeUrls === null ? null : Craft::t(
 				ProductFeeds::HANDLE,
