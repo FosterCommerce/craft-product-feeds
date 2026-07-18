@@ -91,7 +91,7 @@ class FeedValueTest extends TestCase
 	 */
 	public function testMoneyKindPassesValuesThroughUntouched(): void
 	{
-		$this->assertSame(['199.50'], (new FeedValue())->normalize('199.50', AttributeKind::Money));
+		$this->assertSame(['199.50'], (new FeedValue('https://example.test'))->normalize('199.50', AttributeKind::Money));
 	}
 
 	public function testDescriptionsAreStrippedOfMarkup(): void
@@ -100,7 +100,7 @@ class FeedValueTest extends TestCase
 
 		$this->assertSame(
 			['A light-filtering shade. Made to measure.'],
-			(new FeedValue())->normalize($value, AttributeKind::LongText)
+			(new FeedValue('https://example.test'))->normalize($value, AttributeKind::LongText)
 		);
 	}
 
@@ -110,7 +110,7 @@ class FeedValueTest extends TestCase
 	 */
 	public function testEntitiesAreDecoded(): void
 	{
-		$this->assertSame(['Black & White'], (new FeedValue())->normalize('<p>Black &amp; White</p>', AttributeKind::Text));
+		$this->assertSame(['Black & White'], (new FeedValue('https://example.test'))->normalize('<p>Black &amp; White</p>', AttributeKind::Text));
 	}
 
 	/**
@@ -119,18 +119,18 @@ class FeedValueTest extends TestCase
 	 */
 	public function testValuesAreTruncatedToTheGivenLimit(): void
 	{
-		$normalized = (new FeedValue())->normalize(str_repeat('a', 200), AttributeKind::Text, null, 150);
+		$normalized = (new FeedValue('https://example.test'))->normalize(str_repeat('a', 200), AttributeKind::Text, null, 150);
 
 		$this->assertCount(1, $normalized);
 		$this->assertSame(150, mb_strlen($normalized[0]));
 
-		$brand = (new FeedValue())->normalize(str_repeat('a', 200), AttributeKind::Text, null, 70);
+		$brand = (new FeedValue('https://example.test'))->normalize(str_repeat('a', 200), AttributeKind::Text, null, 70);
 		$this->assertSame(70, mb_strlen($brand[0]));
 	}
 
 	public function testValuesAreNotTruncatedWithoutALimit(): void
 	{
-		$normalized = (new FeedValue())->normalize(str_repeat('a', 6000), AttributeKind::LongText);
+		$normalized = (new FeedValue('https://example.test'))->normalize(str_repeat('a', 6000), AttributeKind::LongText);
 
 		$this->assertSame(6000, mb_strlen($normalized[0]));
 	}
@@ -139,7 +139,98 @@ class FeedValueTest extends TestCase
 	{
 		$url = 'https://example.test/shades/roller?a=1&b=2';
 
-		$this->assertSame([$url], (new FeedValue())->normalize($url, AttributeKind::Url));
+		$this->assertSame([$url], (new FeedValue('https://example.test'))->normalize($url, AttributeKind::Url));
+	}
+
+	/**
+	 * An asset filesystem with a relative base URL yields relative asset URLs, which the feed cannot
+	 * publish. Every branch resolves against the site's origin.
+	 */
+	public function testRelativeUrlsAreResolvedAgainstTheSitesOrigin(): void
+	{
+		$feedValue = new FeedValue('https://example.test');
+
+		$this->assertSame(
+			['https://cdn.example.test/slike/a.jpg'],
+			$feedValue->normalize('//cdn.example.test/slike/a.jpg', AttributeKind::Image)
+		);
+
+		$this->assertSame(
+			['https://example.test/doc/slike/a.jpg'],
+			$feedValue->normalize('/doc/slike/a.jpg', AttributeKind::Image)
+		);
+	}
+
+	/**
+	 * A feed is not served from a containing page, so a document-relative base URL has no referent.
+	 * Resolving it as root-relative is the only reading that terminates.
+	 */
+	public function testDocumentRelativeUrlsAreResolvedAsRootRelative(): void
+	{
+		$this->assertSame(
+			['https://example.test/doc/slike/a.jpg'],
+			(new FeedValue('https://example.test'))->normalize('doc/slike/a.jpg', AttributeKind::Image)
+		);
+	}
+
+	/**
+	 * `UrlHelper::siteUrl()` joins against the site's full base URL, path included, so resolving through
+	 * it would splice the subdirectory into every asset URL.
+	 */
+	public function testASubdirectorySiteDoesNotSpliceItsPathIntoAssetUrls(): void
+	{
+		$this->assertSame(
+			['https://example.test/doc/slike/a.jpg'],
+			(new FeedValue('https://example.test/en'))->normalize('/doc/slike/a.jpg', AttributeKind::Image)
+		);
+	}
+
+	/**
+	 * Image values are asset-derived, so resolving one blind is safe. A URL value is hand-typed or
+	 * plugin-supplied, so free text in a PlainText field would otherwise publish as a live link.
+	 */
+	public function testOnlyImageValuesAreResolved(): void
+	{
+		$feedValue = new FeedValue('https://example.test');
+
+		// Left as typed, so `ItemBuilder`'s absolute-only filter drops it rather than publishing a link.
+		$this->assertSame(['Out of stock'], $feedValue->normalize('Out of stock', AttributeKind::Url));
+		$this->assertSame(
+			['https://example.test/Out%20of%20stock'],
+			$feedValue->normalize('Out of stock', AttributeKind::Image)
+		);
+	}
+
+	/**
+	 * With no resolvable origin the value is left alone, which drops it at the absolute-only filter in
+	 * `ItemBuilder` and is the one path that still reaches the CP's relative-URL warning.
+	 */
+	public function testAnUnresolvableBaseUrlLeavesTheValueAlone(): void
+	{
+		$this->assertSame(
+			['/doc/slike/a.jpg'],
+			(new FeedValue('/not-a-site-url'))->normalize('/doc/slike/a.jpg', AttributeKind::Image)
+		);
+	}
+
+	/**
+	 * Absolutizing runs before encoding, so a relative URL still meets Google's RFC 3986 requirement.
+	 */
+	public function testResolvedUrlsAreStillEncoded(): void
+	{
+		$this->assertSame(
+			['https://example.test/doc/slike/a%20b.jpg'],
+			(new FeedValue('https://example.test'))->normalize('/doc/slike/a b.jpg', AttributeKind::Image)
+		);
+	}
+
+	/**
+	 * Blanks are filtered before absolutizing. Resolving one would publish a link to the homepage on
+	 * every item whose image is missing.
+	 */
+	public function testBlankValuesDoNotResolveToTheSitesOrigin(): void
+	{
+		$this->assertSame([], (new FeedValue('https://example.test'))->normalize('', AttributeKind::Image));
 	}
 
 	/**
@@ -149,12 +240,12 @@ class FeedValueTest extends TestCase
 	{
 		$this->assertSame(
 			['https://example.test/assets/a%20b.jpg'],
-			(new FeedValue())->normalize('https://example.test/assets/a b.jpg', AttributeKind::Image)
+			(new FeedValue('https://example.test'))->normalize('https://example.test/assets/a b.jpg', AttributeKind::Image)
 		);
 
 		$this->assertSame(
 			['https://example.test/assets/no%23-1.jpg'],
-			(new FeedValue())->normalize('https://example.test/assets/no#-1.jpg', AttributeKind::Image)
+			(new FeedValue('https://example.test'))->normalize('https://example.test/assets/no#-1.jpg', AttributeKind::Image)
 		);
 	}
 
@@ -207,16 +298,16 @@ class FeedValueTest extends TestCase
 
 	public function testBlankValuesAreDropped(): void
 	{
-		$this->assertSame([], (new FeedValue())->normalize(null, AttributeKind::Text));
-		$this->assertSame([], (new FeedValue())->normalize('', AttributeKind::Text));
-		$this->assertSame([], (new FeedValue())->normalize(['', '  '], AttributeKind::Text));
+		$this->assertSame([], (new FeedValue('https://example.test'))->normalize(null, AttributeKind::Text));
+		$this->assertSame([], (new FeedValue('https://example.test'))->normalize('', AttributeKind::Text));
+		$this->assertSame([], (new FeedValue('https://example.test'))->normalize(['', '  '], AttributeKind::Text));
 	}
 
 	public function testListsSurviveAsLists(): void
 	{
 		$this->assertSame(
 			['https://example.test/1.jpg', 'https://example.test/2.jpg'],
-			(new FeedValue())->normalize(['https://example.test/1.jpg', 'https://example.test/2.jpg'], AttributeKind::Image)
+			(new FeedValue('https://example.test'))->normalize(['https://example.test/1.jpg', 'https://example.test/2.jpg'], AttributeKind::Image)
 		);
 	}
 

@@ -179,7 +179,23 @@ final readonly class ItemBuilder
 
 		$kind = $attributeDefinition->attributeKind;
 		if ($kind === AttributeKind::Url || $kind === AttributeKind::Image) {
-			return array_values(array_filter($values, static fn (string $url): bool => UrlHelper::isAbsoluteUrl($url)));
+			$absolute = [];
+			$firstDropped = null;
+
+			foreach ($values as $value) {
+				if (UrlHelper::isAbsoluteUrl($value)) {
+					$absolute[] = $value;
+				} else {
+					$firstDropped ??= $value;
+				}
+			}
+
+			// Separate from countBlank: a dropped relative URL leaves the attribute empty, same as unmapped.
+			if ($firstDropped !== null) {
+				$this->buildDiagnostics->countRelativeUrl($attributeDefinition->name, $firstDropped);
+			}
+
+			return $absolute;
 		}
 
 		return $values;

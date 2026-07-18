@@ -308,7 +308,13 @@
 							{% if row.invalid %}
 								<div class="warning">{{ 'mapping.nonPositivePrice'|t('product-feeds', { n: row.invalid }) }}</div>
 							{% endif %}
-							{% if not row.blanks and not row.invalid %}
+							{% if row.relativeUrls %}
+								<div class="warning">{{ row.relativeUrlMessage }}</div>
+								{% if row.relativeUrlSample %}
+									<div class="light code">{{ row.relativeUrlSample }}</div>
+								{% endif %}
+							{% endif %}
+							{% if not row.blanks and not row.invalid and not row.relativeUrls %}
 								{% if row.setOnAllItems %}
 									<div class="success">{{ 'mapping.setOnAllItems'|t('product-feeds', { n: row.setOnAllItems }) }}</div>
 								{% else %}

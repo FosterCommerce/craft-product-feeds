@@ -11,6 +11,7 @@ use craft\elements\db\ElementQueryInterface;
 use craft\elements\ElementCollection;
 use craft\helpers\MoneyHelper;
 use craft\helpers\StringHelper;
+use craft\helpers\UrlHelper;
 use DateTimeInterface;
 use fostercommerce\productfeeds\enums\AttributeKind;
 use fostercommerce\productfeeds\models\ImageTransform;
@@ -32,6 +33,14 @@ final class FeedValue
 	 * @var array<int, string>
 	 */
 	private array $categoryPaths = [];
+
+	/**
+	 * Injected, not read from `UrlHelper`, so the class constructs without a booted app.
+	 */
+	public function __construct(
+		private readonly string $siteBaseUrl,
+	) {
+	}
 
 	public static function money(Money $money): string
 	{
@@ -78,7 +87,13 @@ final class FeedValue
 			static fn (string $item): bool => $item !== ''
 		));
 
-		if ($kind === AttributeKind::Url || $kind === AttributeKind::Image) {
+		// Image values are asset-derived; a URL value is hand-typed.
+		// After the blank filter (a blank resolves to the origin), before `encodeUrl()` (it ignores relatives).
+		if ($kind === AttributeKind::Image) {
+			return array_map(fn (string $item): string => self::encodeUrl($this->absolutize($item)), $values);
+		}
+
+		if ($kind === AttributeKind::Url) {
 			return array_map(static fn (string $item): string => self::encodeUrl($item), $values);
 		}
 
@@ -120,6 +135,37 @@ final class FeedValue
 			$path,
 			isset($parts['query']) ? '?' . $parts['query'] : ''
 		);
+	}
+
+	/**
+	 * `UrlHelper::siteUrl()` joins against the site's full base URL, splicing a subdirectory path in.
+	 *
+	 * A feed has no containing page, so a document-relative value is resolved as root-relative.
+	 */
+	private function absolutize(string $url): string
+	{
+		if (UrlHelper::isAbsoluteUrl($url)) {
+			return $url;
+		}
+
+		$base = parse_url($this->siteBaseUrl);
+
+		if (! isset($base['scheme'], $base['host'])) {
+			return $url;
+		}
+
+		if (UrlHelper::isProtocolRelativeUrl($url)) {
+			return $base['scheme'] . ':' . $url;
+		}
+
+		$origin = sprintf(
+			'%s://%s%s',
+			$base['scheme'],
+			$base['host'],
+			isset($base['port']) ? ':' . $base['port'] : ''
+		);
+
+		return $origin . '/' . ltrim($url, '/');
 	}
 
 	/**

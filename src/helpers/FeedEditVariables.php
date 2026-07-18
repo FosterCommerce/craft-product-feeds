@@ -8,6 +8,7 @@ use Craft;
 use craft\base\ElementInterface;
 use craft\elements\Asset;
 use craft\models\Site;
+use fostercommerce\productfeeds\enums\AttributeKind;
 use fostercommerce\productfeeds\enums\ImageEngine;
 use fostercommerce\productfeeds\enums\ImageFit;
 use fostercommerce\productfeeds\enums\Platform;
@@ -113,11 +114,22 @@ final class FeedEditVariables
 			$mappingSource = $feed->mappingSource($name, $spec);
 			$blanks = $diagnostics->blankByAttribute[$name] ?? null;
 			$invalid = $diagnostics->invalidByAttribute[$name] ?? null;
+			// An image only drops on an unparseable site base URL; a URL value drops on the value itself.
+			$relativeUrls = $diagnostics->relativeUrlByAttribute[$name] ?? null;
+			$relativeUrlMessage = $relativeUrls === null ? null : Craft::t(
+				ProductFeeds::HANDLE,
+				$attributeDefinition->attributeKind === AttributeKind::Image
+					? 'mapping.unresolvedImageUrls'
+					: 'mapping.relativeUrls',
+				[
+					'n' => $relativeUrls,
+				]
+			);
 
 			// Only an attribute the feed carries, with nothing reported against it, was set on every item. The
 			// gallery is excluded: a blank one is normal.
 			$setOnAllItems = null;
-			if ($blanks === null && $invalid === null && $mappingSource !== Mapping::NO_INCLUDE && $name !== $galleryAttribute) {
+			if ($blanks === null && $invalid === null && $relativeUrls === null && $mappingSource !== Mapping::NO_INCLUDE && $name !== $galleryAttribute) {
 				$setOnAllItems = $feed->lastBuildItemCount;
 			}
 
@@ -133,6 +145,9 @@ final class FeedEditVariables
 				'defaultOptions' => self::defaultOptions($attributeDefinition),
 				'blanks' => $blanks,
 				'invalid' => $invalid,
+				'relativeUrls' => $relativeUrls,
+				'relativeUrlMessage' => $relativeUrlMessage,
+				'relativeUrlSample' => $diagnostics->sampleRelativeUrls[$name] ?? null,
 				'setOnAllItems' => $setOnAllItems,
 			];
 		}

@@ -11,7 +11,6 @@ use craft\base\FsInterface;
 use craft\commerce\models\Store;
 use craft\errors\FsException;
 use craft\helpers\FileHelper;
-use craft\helpers\UrlHelper;
 use DateTime;
 use fostercommerce\productfeeds\enums\BuildStatus;
 use fostercommerce\productfeeds\errors\FeedBuildException;
@@ -95,7 +94,7 @@ class Builds extends Component
 		$reportPath = sprintf('%s/%s', $tempDirectory, $feed->getExcludedReportFileName());
 
 		$diagnostics = new BuildDiagnostics();
-		$writer = $spec->writer($tempPath, $feed->name, UrlHelper::siteUrl('', null, null, $feed->siteId));
+		$writer = $spec->writer($tempPath, $feed->name, $feed->getSiteBaseUrl());
 		$report = new ExcludedReport($reportPath);
 		$itemBuilder = new ItemBuilder($feed, $spec, $source, $diagnostics);
 
