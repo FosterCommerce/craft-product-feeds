@@ -1,15 +1,23 @@
 # Changelog
 
-## [Unreleased]
+## 1.2.0 - 2026-07-23
+
+### Added
+- Added support for mapping CKEditor fields to text attributes. ([#2](https://github.com/FosterCommerce/craft-product-feeds/issues/2))
+
+### Changed
+- Build diagnostics now record skipped items under `skippedByAttribute`. Note: Any previous counts will read as zero until the feed is rebuilt.
 
 ### Fixed
-- Fixed issue where a feed URL returned a 404 after a build failed.
-- Fixed issue where a feed fetched while a build was publishing could be served truncated.
-- Fixed issue where changing a feed's platform left its previous file on the feed filesystem.
-- Fixed issue where a feed whose image plugin had been uninstalled excluded every item without naming the cause.
-- Fixed issue where the excluded products CSV could be published with rows missing.
-- Fixed issue where Build now reported a build as queued when one was already waiting.
-- Fixed issue where a feed created after a queue worker started was not rebuilt when its products changed.
+- Fixed a bug where an image attribute dropped a relative asset URL instead of resolving it against the site's base URL. ([#2](https://github.com/FosterCommerce/craft-product-feeds/issues/2))
+- Fixed an issue where a dropped non-absolute URL or image value wasn't named on the mapping screen.
+- Fixed a bug where a feed's URL returned a 404 after a build failed.
+- Fixed a bug where a feed fetched while a build was publishing could be served truncated.
+- Fixed a bug where changing a feed's platform left its previous file on the feed filesystem.
+- Fixed a bug where a feed whose image plugin had been uninstalled excluded every item without naming the cause.
+- Fixed a bug where the excluded products CSV could be published with rows missing.
+- Fixed a bug where “Build now” reported a build as queued when one was already waiting.
+- Fixed a bug where a feed created after a queue worker started wasn't rebuilt when its products changed.
 
 ## 1.1.0 - 2026-07-14
 
