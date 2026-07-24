@@ -69,4 +69,4 @@ Stock levels are the exception to auto-rebuild: changing one does not save the v
 
 ## The feed URL stopped working
 
-Rotating a feed's token mints a new URL and deletes the file the old one pointed at. The new URL returns a 404 until the feed is built again, so build it, then paste the new URL into the platform that fetches it.
+Rotating a feed's token mints a new URL and moves the built feed to it, so the new URL serves the current feed straight away. The old URL stops working as soon as the rotation saves. Paste the new URL into the platform that fetches it.

@@ -112,7 +112,6 @@ class FeedsController extends Controller
 
 		$this->requireSiteAccess($feed);
 
-		// A new feed opens with its source's suggested mapping already filled in.
 		if ($feed->id === null && $feed->fieldMapping === []) {
 			$feed->fieldMapping = FeedSource::forFeed($feed)->defaultMapping();
 		}
@@ -301,10 +300,13 @@ class FeedsController extends Controller
 		$this->requirePermission(ProductFeeds::PERMISSION_BUILD);
 
 		$feed = $this->feedFromRequest();
-		ProductFeeds::plugin()->getBuildQueue()->requestBuild((int) $feed->id);
+		$queued = ProductFeeds::plugin()->getBuildQueue()->requestBuild((int) $feed->id);
 
 		// The index button posts by ajax; the edit screen's button posts the page form.
-		return $this->asSuccess(Craft::t(ProductFeeds::HANDLE, 'feed.buildQueued'), redirect: $feed->getCpEditUrl());
+		return $this->asSuccess(
+			Craft::t(ProductFeeds::HANDLE, $queued ? 'feed.buildQueued' : 'feed.buildAlreadyQueued'),
+			redirect: $feed->getCpEditUrl()
+		);
 	}
 
 	/**
@@ -417,9 +419,8 @@ class FeedsController extends Controller
 		$feed = $this->postedFeed();
 		$this->requireSiteAccess($feed);
 
-		// The edit form does not post the filter, and the test resolves its image from the first element the
-		// source returns. Without the saved feed's filter that is the first element in the catalog, which the
-		// feed may not publish at all.
+		// The edit form posts no filter, and the test reads the first element the source returns. Without
+		// the saved filter that is the first element in the catalog, which the feed may never publish.
 		$feedId = $this->toInt($this->request->getBodyParam('feedId'));
 		if ($feedId !== 0) {
 			$saved = ProductFeeds::plugin()->getFeeds()->getFeedById($feedId) ?? throw new NotFoundHttpException();
@@ -433,7 +434,8 @@ class FeedsController extends Controller
 			throw new BadRequestHttpException(implode(' ', $feed->getFirstErrors()));
 		}
 
-		return $this->asJson(ProductFeeds::plugin()->getBuilds()->testImage($feed)->toArray());
+		// `feed-edit.js` reads the result's public properties straight off the JSON.
+		return $this->asJson(ProductFeeds::plugin()->getBuilds()->testImage($feed));
 	}
 
 	/**

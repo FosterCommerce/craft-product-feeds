@@ -76,23 +76,4 @@ final readonly class ImageTestResult
 			error: null,
 		);
 	}
-
-	/**
-	 * @return array{ok: bool, url: ?string, status: ?int, contentType: ?string, width: ?int, height: ?int, meetsMinimum: bool, minimumWidth: ?int, minimumHeight: ?int, error: ?string}
-	 */
-	public function toArray(): array
-	{
-		return [
-			'ok' => $this->ok,
-			'url' => $this->url,
-			'status' => $this->status,
-			'contentType' => $this->contentType,
-			'width' => $this->width,
-			'height' => $this->height,
-			'meetsMinimum' => $this->meetsMinimum,
-			'minimumWidth' => $this->minimumWidth,
-			'minimumHeight' => $this->minimumHeight,
-			'error' => $this->error,
-		];
-	}
 }

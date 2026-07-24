@@ -12,7 +12,7 @@ composer test
 
 ## Integration
 
-Boots a real Craft install and exercises the parts that need one: the build pipeline end to end, the auto-rebuild triggers, the queue's pending and dirty flags, and the source queries.
+Boots a real Craft install and exercises the parts that need one: the build pipeline end to end, the auto-rebuild triggers, the queue's pending flag and stand-down, and the source queries.
 
 It needs a working Craft + Commerce install with the plugin enabled. Point `CRAFT_BASE_PATH` at it, and run the suite from the plugin directory:
 

@@ -21,7 +21,7 @@ Every attribute the platform defines gets a row on the **Mapping** tab, apart fr
 - **Variant properties** / **Product properties**, or **Entry properties** on an entry feed: a native value such as the SKU, the product title, or the product URL.
 - **Variant fields** and **Product fields**, or **Entry fields**: a Craft field. On a variant feed the variant's own fields and its product's fields are listed separately.
 
-Each attribute offers a fixed set of field types, and nothing else appears in its dropdown. Text attributes take a Plain Text, Number, Dropdown, Radio Buttons, Checkboxes, Lightswitch, Email, or Categories field. `image_link` and `additional_image_link` take an Assets field. `price` and `sale_price` take a Number or Plain Text field. `product_type` takes a Categories or Plain Text field. Every other field type, including Matrix, Table, Date, Link, Money, Entries, Tags, Users, and Color, and anything a third-party plugin adds, is left out.
+Each attribute offers a fixed set of field types, and nothing else appears in its dropdown. Text attributes, `title` and `description` among them, take a Plain Text, Number, Dropdown, Radio Buttons, Checkboxes, Lightswitch, Email, Categories, or CKEditor field. `link` takes a Plain Text field. `image_link` and `additional_image_link` take an Assets field. `price` and `sale_price` take a Number or Plain Text field. `product_type` takes a Categories or Plain Text field. Every other field type, including Matrix, Table, Date, Link, Money, Entries, Tags, Users, and Color, is left out.
 
 On an entry feed, only fields on the entry types you selected are listed. Select another entry type, save, and its fields appear in the dropdown on the reloaded screen.
 

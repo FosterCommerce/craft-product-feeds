@@ -45,7 +45,7 @@ Meta and TikTok require `brand` and `condition` on top of those. Klaviyo require
 | `title` | all | 150, Pinterest 500 | Plain text |
 | `description` | all | 5000, Microsoft and Pinterest 10,000 | Markup stripped |
 | `link` | all | | Must be absolute |
-| `image_link` | all | | Any mapping whose value resolves to an absolute URL, usually an Assets field. A value that is not an absolute URL is dropped. The default value is an asset, used when the mapped field is empty. Both go through the feed's image engine |
+| `image_link` | all | | An Assets field; no other field type is offered for it. A value that is not an absolute URL is dropped. The default value is an asset, used when the mapped field is empty. Both go through the feed's image engine |
 | `additional_image_link` | none | | Up to 10. Defaults to assets two to eleven of the `image_link` field; can be mapped to an asset field of its own. Not offered on a Microsoft feed, which ignores it |
 | `brand` | Meta, TikTok | 70 | Google and Microsoft treat it as conditional, via `identifier_exists`. Pinterest leaves it optional |
 | `gtin` | none | | Never truncated |
@@ -63,7 +63,7 @@ Google takes `in_stock` and `out_of_stock`. Meta, Microsoft, Pinterest, and TikT
 
 `preorder` is accepted everywhere, but nothing in Commerce can derive it. An entry feed can map it as a default value.
 
-A variant is `out_of_stock` when it is not available for purchase, when its stock is tracked and below one, or when the feed's store holds no stock record for it. A product that is disabled, or whose post date has not arrived, or whose expiry date has passed, is omitted from the feed entirely rather than marked out of stock.
+A variant is `out_of_stock` when it is not available for purchase, or when the feed's store holds no stock record for it. A variant whose stock is tracked and below one is `out_of_stock` only when Commerce also refuses to sell it; where Commerce still allows the purchase, a backordered variant is sent as `in_stock`. A product that is disabled, or whose post date has not arrived, or whose expiry date has passed, is omitted from the feed entirely rather than marked out of stock.
 
 ## Klaviyo
 

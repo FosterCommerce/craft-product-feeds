@@ -114,6 +114,8 @@ class Feed extends Model implements Statusable
 
 	private ?FeedSpec $spec = null;
 
+	private ?Platform $specPlatform = null;
+
 	public function init(): void
 	{
 		parent::init();
@@ -179,8 +181,16 @@ class Feed extends Model implements Statusable
 
 	public function getSpec(): FeedSpec
 	{
-		// A spec parses its attributes once and remembers them, so a fresh one per call would reparse them.
-		return $this->spec ??= FeedSpec::forPlatform($this->getPlatform());
+		$platform = $this->getPlatform();
+
+		// Keyed on the platform, which is a public property: a feed can be handed a new one after the
+		// spec has been resolved, and `clone` carries the resolved spec across.
+		if (! $this->spec instanceof FeedSpec || $this->specPlatform !== $platform) {
+			$this->spec = FeedSpec::forPlatform($platform);
+			$this->specPlatform = $platform;
+		}
+
+		return $this->spec;
 	}
 
 	/**

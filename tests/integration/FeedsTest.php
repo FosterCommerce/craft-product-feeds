@@ -105,6 +105,59 @@ class FeedsTest extends IntegrationTestCase
 		$this->assertSame(7, $reloaded->lastBuildItemCount);
 	}
 
+	/**
+	 * A failed build publishes nothing, so the artifact the route is serving is still the previous one.
+	 */
+	public function testAFailedBuildKeepsTheServedArtifactsNumbers(): void
+	{
+		$feed = $this->makeFeed('failed');
+
+		$this->feeds()->recordBuild($feed, BuildStatus::Ok, new DateTime(), new BuildResult(9, 512, 4096, new BuildDiagnostics()));
+		$this->feeds()->recordBuild($feed, BuildStatus::Failed, new DateTime(), error: 'Disk full.');
+
+		$reloaded = $this->feeds()->getFeedById((int) $feed->id);
+
+		$this->assertNotNull($reloaded);
+		$this->assertSame(BuildStatus::Failed, $reloaded->getLastBuildStatus());
+		$this->assertSame('Disk full.', $reloaded->lastBuildError);
+		$this->assertSame(9, $reloaded->lastBuildItemCount);
+		$this->assertSame(512, $reloaded->lastBuildBytes);
+		$this->assertSame(4096, $reloaded->lastBuildBytesUncompressed);
+	}
+
+	/**
+	 * The stored path carries the platform's extension, so a switch leaves a file nothing serves.
+	 */
+	public function testChangingThePlatformDeletesTheSupersededArtifact(): void
+	{
+		$feed = $this->buildableFeed('platformSwap', Platform::Google);
+		$this->buildOrSkip($feed);
+
+		$supersededPath = $feed->getPath();
+		$filesystem = $this->feeds()->getFs();
+		$this->assertTrue($filesystem->fileExists($supersededPath));
+
+		$feed->platform = Platform::Klaviyo->value;
+		$this->assertTrue($this->feeds()->saveFeed($feed));
+
+		$this->assertFalse($filesystem->fileExists($supersededPath), 'The superseded artifact was left behind.');
+	}
+
+	/**
+	 * The delete keys off the stored path changing, so every other save has to leave the artifact alone.
+	 */
+	public function testAnOrdinarySaveKeepsThePublishedArtifact(): void
+	{
+		$feed = $this->buildableFeed('ordinarySave', Platform::Google);
+		$this->buildOrSkip($feed);
+
+		$path = $feed->getPath();
+		$feed->name = 'Renamed after publishing';
+		$this->assertTrue($this->feeds()->saveFeed($feed));
+
+		$this->assertTrue($this->feeds()->getFs()->fileExists($path), 'An ordinary save deleted the feed.');
+	}
+
 	public function testRotateTokenMintsANewTokenAndReportsIt(): void
 	{
 		$feed = $this->makeFeed('rotate');

@@ -88,6 +88,7 @@ class Feeds extends Component
 
 	/**
 	 * @throws Exception
+	 * @throws FsException
 	 */
 	public function saveFeed(Feed $feed): bool
 	{
@@ -100,6 +101,10 @@ class Feeds extends Component
 		}
 
 		$record = $feed->id === null ? new FeedRecord() : $this->requireRecord($feed);
+
+		// The stored path derives from the token and the platform's extension, either of which this save
+		// may be changing.
+		$supersededPath = $feed->id === null ? null : $this->supersededArtifactPath($feed, $record);
 
 		$record->name = $feed->name;
 		$record->handle = $feed->handle;
@@ -123,6 +128,10 @@ class Feeds extends Component
 
 		$feed->id = $record->id;
 		$feed->uid = $record->uid;
+
+		if ($supersededPath !== null) {
+			$this->deletePaths([$supersededPath]);
+		}
 
 		return true;
 	}
@@ -149,12 +158,18 @@ class Feeds extends Component
 		}
 
 		$record->lastBuildFinishedAt = Db::prepareDateForDb(new DateTime());
-		$record->lastBuildItemCount = $result?->itemCount;
-		$record->lastBuildSkippedCount = $result?->buildDiagnostics->skippedCount();
-		$record->lastBuildBytes = $result?->bytes;
-		$record->lastBuildBytesUncompressed = $result?->bytesUncompressed;
 		$record->lastBuildError = $error;
-		$record->lastBuildDiagnostics = Json::encode($result?->buildDiagnostics->toArray() ?? []);
+
+		// A failed build publishes nothing, so these still describe the artifact being served, and
+		// `FeedController` serves no feed whose row carries no size.
+		if ($result instanceof BuildResult) {
+			$record->lastBuildItemCount = $result->itemCount;
+			$record->lastBuildSkippedCount = $result->buildDiagnostics->skippedCount();
+			$record->lastBuildBytes = $result->bytes;
+			$record->lastBuildBytesUncompressed = $result->bytesUncompressed;
+			$record->lastBuildDiagnostics = Json::encode($result->buildDiagnostics->toArray());
+		}
+
 		$record->save(false);
 	}
 
@@ -190,7 +205,6 @@ class Feeds extends Component
 	 */
 	public function duplicateFeed(Feed $feed): ?Feed
 	{
-		// A copy carries every setting across. Only what has to be unique differs.
 		$duplicate = clone $feed;
 		$duplicate->id = null;
 		$duplicate->uid = null;
@@ -202,9 +216,8 @@ class Feeds extends Component
 		$duplicate->enabled = false;
 		$duplicate->sortOrder = null;
 
-		// The copy has never been built, and `saveFeed()` doesn't write the build columns, so the new row
-		// comes up at its defaults. The clone has to be reset to match, diagnostics included: `clone` is
-		// shallow, so both feeds would otherwise share one `BuildDiagnostics`.
+		// `saveFeed()` writes no build column, so the new row comes up at its defaults and the clone has
+		// to match. Diagnostics included: `clone` is shallow, so both feeds would share one.
 		$duplicate->lastBuildStatus = BuildStatus::Pending->value;
 		$duplicate->lastBuildStartedAt = null;
 		$duplicate->lastBuildFinishedAt = null;
@@ -363,10 +376,22 @@ class Feeds extends Component
 
 	private function nextSortOrder(): int
 	{
-		// `max()` hands back whatever the PDO driver gave it, and null when the table is empty.
+		// `max()` hands back whatever the PDO driver gave it, string included.
 		$highest = FeedRecord::find()->max('[[sortOrder]]');
 
 		return is_numeric($highest) ? (int) $highest + 1 : 1;
+	}
+
+	/**
+	 * The artifact this save strands, or null where it keeps writing to the same path.
+	 */
+	private function supersededArtifactPath(Feed $feed, FeedRecord $record): ?string
+	{
+		$stored = new Feed();
+		$stored->token = $record->token;
+		$stored->platform = $record->platform;
+
+		return $stored->getPath() === $feed->getPath() ? null : $stored->getPath();
 	}
 
 	/**

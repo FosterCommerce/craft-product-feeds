@@ -25,6 +25,7 @@ use Twig\Error\SyntaxError;
 use yii\base\Event;
 use yii\base\Exception;
 use yii\base\InvalidConfigException;
+use yii\queue\Queue;
 
 /**
  * @method Settings getSettings()
@@ -171,8 +172,17 @@ class ProductFeeds extends BasePlugin
 	 */
 	private function registerElementEvents(): void
 	{
-		// Resolved once, so the three handlers below don't each have to deal with `get()` throwing.
+		// Resolved once, so the handlers below don't each have to deal with `get()` throwing.
 		$autoRebuild = $this->getAutoRebuild();
+
+		// A worker runs every job in one process, so this service outlives the feed list it memoizes.
+		Event::on(
+			Queue::class,
+			Queue::EVENT_BEFORE_EXEC,
+			static function () use ($autoRebuild): void {
+				$autoRebuild->forgetFeeds();
+			}
+		);
 
 		Event::on(
 			Elements::class,

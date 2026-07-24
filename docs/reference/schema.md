@@ -63,4 +63,4 @@ Built feeds are not stored in the database. Each one is written to the plugin's 
 | `product-feeds/<token>.<extension>.gz` | The gzipped feed. Overwritten on each build rather than timestamped. |
 | `product-feeds/<token>-excluded.csv` | The full list of excluded items. Deleted when a build excludes nothing. |
 
-Both are named from the token, so rotating a feed's token orphans nothing: the old files are deleted first.
+Both are named from the token, so rotating a feed's token orphans nothing: they are copied to the new token's paths, and the old ones deleted once the new token has saved. Changing a feed's platform renames the artifact the same way, and the superseded file is deleted on save.

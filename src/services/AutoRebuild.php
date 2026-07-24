@@ -48,6 +48,15 @@ class AutoRebuild extends Component
 	private array $watchedFields = [];
 
 	/**
+	 * Both memos are only safe for the length of one job; a worker holds this service for far longer.
+	 */
+	public function forgetFeeds(): void
+	{
+		$this->enabledFeeds = null;
+		$this->watchedFields = [];
+	}
+
+	/**
 	 * @throws InvalidConfigException
 	 */
 	public function onSave(ElementInterface $element, bool $isNew): void
@@ -72,15 +81,12 @@ class AutoRebuild extends Component
 	}
 
 	/**
-	 * Queues a build of every enabled feed this element belongs to.
-	 *
 	 * @throws InvalidConfigException
 	 */
 	private function queueBuildsFor(ElementInterface $element, ElementChange $change): void
 	{
-		// Drafts, revisions and propagated saves are not the live element. `resaving` is Craft re-saving the
-		// whole catalog after a field layout edit: a membership query per element per feed, and a republish
-		// of a feed nothing changed in.
+		// Drafts, revisions and propagated saves are not the live element. `resaving` is Craft re-saving
+		// the whole catalog after a field layout edit, which nothing in the feed actually changed.
 		if ($element->getIsDraft() || $element->getIsRevision() || $element->isProvisionalDraft || $element->propagating || $element->resaving) {
 			return;
 		}

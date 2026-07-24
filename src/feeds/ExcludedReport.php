@@ -41,13 +41,21 @@ final class ExcludedReport
 
 	/**
 	 * @param array{id: string, title: string, cpUrl: string, issue: string} $row
+	 * @throws Exception
 	 */
 	public function write(array $row): void
 	{
-		fputcsv($this->handle, array_map(
+		$written = fputcsv($this->handle, array_map(
 			$this->escapeFormula(...),
 			[$row['id'], $row['title'], $row['cpUrl'], $row['issue']]
 		), ',', '"', '');
+
+		// A discarded failure publishes a short report against a build that still records a success.
+		if ($written === false) {
+			throw new Exception(Craft::t(ProductFeeds::HANDLE, 'error.excludedReportWriteFailed', [
+				'path' => $this->filePath,
+			]));
+		}
 	}
 
 	public function close(): void

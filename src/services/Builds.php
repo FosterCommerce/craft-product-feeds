@@ -13,6 +13,7 @@ use craft\errors\FsException;
 use craft\helpers\FileHelper;
 use DateTime;
 use fostercommerce\productfeeds\enums\BuildStatus;
+use fostercommerce\productfeeds\enums\ImageEngine;
 use fostercommerce\productfeeds\errors\FeedBuildException;
 use fostercommerce\productfeeds\feeds\AttributeDefinition;
 use fostercommerce\productfeeds\feeds\ExcludedReport;
@@ -35,8 +36,7 @@ use yii\base\InvalidConfigException;
 class Builds extends Component
 {
 	/**
-	 * Builds a feed under its lock. The entry point for anything that builds a live feed: the queue job and
-	 * the console command.
+	 * The entry point for any live build: the queue job and the console command.
 	 *
 	 * Standing down is the caller's to handle: `BuildFeed` comes back later, the console reports it.
 	 *
@@ -104,14 +104,13 @@ class Builds extends Component
 		$bytesUncompressed = Gzip::uncompressedSize($tempPath);
 
 		try {
-			$this->publishFile($fs, $tempPath, $feed->getPath());
+			// `FeedController` sends the row's byte count as the response length, and the row is not
+			// updated until `buildAndRecord()` has this result back.
 			$this->publishReport($fs, $feed, $reportPath, $diagnostics->skippedCount() > 0);
+			$this->publishFile($fs, $tempPath, $feed->getPath());
 		} finally {
-			// `publishFile()` only clears the temp file it was handed, so a throw before the report is
-			// published strands the report's own.
-			if (is_file($reportPath)) {
-				FileHelper::unlink($reportPath);
-			}
+			// `publishFile()` only clears the temp file it was handed, so a throw leaves the report's own.
+			FileHelper::unlink($reportPath);
 		}
 
 		return new BuildResult($itemCount, $bytes, $bytesUncompressed, $diagnostics);
@@ -182,8 +181,7 @@ class Builds extends Component
 	}
 
 	/**
-	 * Fetches the image the first item of the feed would publish, so the admin can see what the platform
-	 * will receive before a build runs.
+	 * Fetches the image the feed's first item would publish, resolved exactly as a build resolves it.
 	 *
 	 * @throws InvalidConfigException
 	 */
@@ -239,6 +237,15 @@ class Builds extends Component
 	{
 		if (! $feed->getStore() instanceof Store) {
 			throw new FeedBuildException(Craft::t(ProductFeeds::HANDLE, 'error.noStoreForSite'));
+		}
+
+		// An engine whose plugin has gone resolves every image to null, which would exclude every item
+		// and report it as a blank `image_link`.
+		$imageEngine = ImageEngine::from($feed->imageEngine);
+		if (! $imageEngine->isAvailable()) {
+			throw new FeedBuildException(Craft::t(ProductFeeds::HANDLE, 'error.imageEngineUnavailable', [
+				'engine' => $imageEngine->label(),
+			]));
 		}
 
 		$withoutUrls = $source->sourcesWithoutUrls();

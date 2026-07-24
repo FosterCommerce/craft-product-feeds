@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace fostercommerce\productfeeds\feeds;
 
 use Craft;
+use craft\helpers\FileHelper;
 use fostercommerce\productfeeds\ProductFeeds;
 use yii\base\Exception;
 
@@ -50,9 +51,7 @@ abstract class FeedWriter
 	{
 		$this->releaseHandle();
 
-		if (is_file($this->filePath)) {
-			@unlink($this->filePath);
-		}
+		FileHelper::unlink($this->filePath);
 	}
 
 	/**

@@ -85,8 +85,7 @@ class JsonFeedWriter extends FeedWriter
 		$this->handle = null;
 
 		// The deflate filter reports a successful `fwrite()` before the bytes exist on disk: the last of
-		// them, and the gzip trailer, are written here. A discarded failure publishes a truncated archive
-		// as a successful build.
+		// them, and the gzip trailer, are written here. A discarded failure publishes a truncated archive.
 		if (! fclose($handle)) {
 			throw $this->writeFailed();
 		}
