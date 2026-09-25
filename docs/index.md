@@ -1,18 +1,25 @@
 # Product Feeds documentation
 
-Builds product feeds from Craft Commerce variants or Craft entries, and serves each one from a stable URL that a shopping platform fetches on a schedule.
+Build auto-updating **product feeds** for shopping and social platforms from Craft Commerce variants, Craft entries, or custom sources.
 
 ## Where to go
 
-**Setting it up?** Start with [Installation](./installation.md), which covers the filesystem, the settings, and scheduling the build.
+**Getting started:** [installation](./installation.md), covering the filesystem, settings, and scheduling the build.
 
-**Running feeds day-to-day?** See the user guide:
+**User guide:**
 
 - [Mapping a feed](./user-guide/mapping.md), how to connect Craft data to platform attributes
-- [Troubleshooting](./user-guide/troubleshooting.md), why a feed failed, or came out thin
+- [Troubleshooting](./user-guide/troubleshooting.md), why a feed failed or has fewer items than expected
 
-**Looking something up?**
+**Dev guide:**
+
+- [Add a custom source](./dev-guide/custom-sources.md), publish items from elements the built-in sources do not read, such as one per size
+
+**Reference:**
 
 - [Attributes](./reference/attributes.md), which attributes exist, which are required, and which the plugin derives
 - [Schema](./reference/schema.md), the table the plugin installs and what a build records on it
 - [Permissions](./reference/permissions.md), what each permission grants
+- [Events](./reference/events.md), the event for registering a custom source
+
+**Roadmap:** [ideas under consideration](./roadmap.md)

@@ -14,6 +14,7 @@ use craft\models\Section;
 use fostercommerce\productfeeds\enums\Availability;
 use fostercommerce\productfeeds\enums\StandardAttribute;
 use fostercommerce\productfeeds\helpers\Mapping;
+use fostercommerce\productfeeds\ProductFeeds;
 use yii\base\InvalidConfigException;
 
 /**
@@ -35,13 +36,16 @@ class EntrySource extends FeedSource
 			]);
 	}
 
-	/**
-	 * `item_group_id`, `sale_price` and `sale_price_effective_date` have no entry equivalent. They
-	 * are listed as computed so they never appear on the mapping screen, and compute to null.
-	 */
+	public function twigVariables(): array
+	{
+		return [
+			'object' => Craft::t(ProductFeeds::HANDLE, 'twig.entry'),
+		];
+	}
+
 	public function computedAttributes(): array
 	{
-		return ['id', 'item_group_id', 'sale_price', 'sale_price_effective_date'];
+		return ['id'];
 	}
 
 	public function compute(ElementInterface $element, string $attribute): string|array|null
@@ -214,8 +218,8 @@ class EntrySource extends FeedSource
 	}
 
 	/**
-	 * A nested Matrix entry has no section, so it can never satisfy one of these pairs and never
-	 * reaches the feed.
+	 * A nested Matrix entry has no section, so it never satisfies one of these pairs, and the feed never
+	 * includes it.
 	 *
 	 * @param EntryQuery<int, Entry> $query
 	 * @throws InvalidConfigException
@@ -231,7 +235,7 @@ class EntrySource extends FeedSource
 			];
 		}
 
-		// An empty OR builds no condition at all, which would feed every entry on the site.
+		// Use a false condition for an empty OR, since an empty condition would include every entry on the site.
 		$query->andWhere($pairs === ['or'] ? '1 = 0' : $pairs);
 	}
 

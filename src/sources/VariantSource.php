@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace fostercommerce\productfeeds\sources;
 
+use Craft;
 use craft\base\Element;
 use craft\base\ElementInterface;
 use craft\commerce\db\Table as CommerceTable;
@@ -20,6 +21,7 @@ use DateTime;
 use DateTimeInterface;
 use fostercommerce\productfeeds\enums\Availability;
 use fostercommerce\productfeeds\helpers\Mapping;
+use fostercommerce\productfeeds\ProductFeeds;
 use Throwable;
 use yii\base\InvalidConfigException;
 
@@ -29,8 +31,8 @@ use yii\base\InvalidConfigException;
 class VariantSource extends FeedSource
 {
 	/**
-	 * One store row per variant, keyed by purchasable ID. `stock` has no setter on `Purchasable`, so it
-	 * cannot reach the element as a selected column and `getStock()` would be a query per variant.
+	 * One store row per variant, keyed by purchasable ID. `stock` has no setter on `Purchasable`, so a
+	 * selected `stock` column can't be set on the element, and `getStock()` would be a query per variant.
 	 *
 	 * @var array<int, array{stock: ?int, inventoryTracked: bool, availableForPurchase: bool}>
 	 */
@@ -51,6 +53,13 @@ class VariantSource extends FeedSource
 			->orderBy([
 				'elements.id' => SORT_ASC,
 			]);
+	}
+
+	public function twigVariables(): array
+	{
+		return [
+			'object' => Craft::t(ProductFeeds::HANDLE, 'twig.variant'),
+		];
 	}
 
 	public function computedAttributes(): array
@@ -426,7 +435,7 @@ class VariantSource extends FeedSource
 
 	/**
 	 * Catalog pricing rules do not expose a start and end date on the element, so a store using them
-	 * sends no sale window at all. Only the older Sales system carries the dates.
+	 * doesn't send a sale window. Only the older Sales system has the dates.
 	 *
 	 * @throws InvalidConfigException
 	 */

@@ -69,8 +69,8 @@ class FeedController extends Controller
 	}
 
 	/**
-	 * `fileSize` is mandatory. Without it Yii measures the stream by seeking to its end, which gives the
-	 * wrong length for both a remote file and an inflated one.
+	 * `fileSize` is mandatory. Without it Yii measures the stream by seeking to its end, and that seek
+	 * gives the wrong length for both a remote file and an inflated one.
 	 *
 	 * @throws FsException
 	 * @throws InvalidConfigException

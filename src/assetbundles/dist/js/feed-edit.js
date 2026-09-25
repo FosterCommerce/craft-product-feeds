@@ -1,6 +1,6 @@
 (function () {
-	// New feeds only: an existing handle names the queue lock and the download filename, so it must
-	// not follow the name around.
+	// Generate the handle for new feeds only, since an existing handle names the queue lock and the
+	// download filename.
 	if (document.getElementById('handle').value === '') {
 		new Craft.HandleGenerator('#name', '#handle');
 	}
@@ -33,6 +33,7 @@
 	const sourceSelect = document.getElementById('source');
 	const siteInput = document.getElementById('siteId');
 	const sourceIdsField = document.getElementById('source-ids');
+	const filterField = document.getElementById('feed-filter-field');
 
 	const checkedSourceIds = () =>
 		Array.from(sourceIdsField.querySelectorAll('input[type=checkbox]:checked'))
@@ -50,11 +51,46 @@
 		});
 
 		sourceIdsField.innerHTML = response.data.html;
+
+		// Hide the type picker and filter, since a custom source picks its own elements.
+		sourceIdsField.classList.toggle('hidden', response.data.isCustomSource);
+		filterField?.classList.toggle('hidden', response.data.isCustomSource);
+	};
+
+	// Hide the mapping on a source, type, or platform change, since its dropdowns list the fields the page loaded with.
+	const mappingFields = document.getElementById('mapping-fields');
+	const markMappingStale = () => {
+		if (mappingFields === null) {
+			return;
+		}
+
+		mappingFields.classList.add('hidden');
+		document.getElementById('mapping-stale').classList.remove('hidden');
 	};
 
 	sourceSelect.addEventListener('change', () => {
+		markMappingStale();
 		refreshSourceIds().catch(showRequestError);
 	});
+
+	sourceIdsField.addEventListener('change', markMappingStale);
+	document.getElementById('platform').addEventListener('change', markMappingStale);
+
+	const mappingTable = document.querySelector('.pf-mapping-table');
+	if (mappingTable !== null) {
+		const sourcesWithoutDefault = JSON.parse(mappingTable.dataset.sourcesWithoutDefault);
+
+		mappingTable.addEventListener('change', (event) => {
+			if (!event.target.matches('select[name$="[source]"]')) {
+				return;
+			}
+
+			const row = event.target.closest('tr');
+			row.querySelector('.pf-default-value')
+				?.classList.toggle('hidden', sourcesWithoutDefault.includes(event.target.value));
+			row.querySelector('.pf-twig-value').classList.toggle('hidden', event.target.value !== 'twig');
+		});
+	}
 
 	// Open the chip in a slideout rather than navigating, so unsaved feed changes survive.
 	document.addEventListener('click', (event) => {
@@ -97,16 +133,23 @@
 		const testOutput = document.getElementById('image-test-output');
 		const imageAttribute = testButton.dataset.imageAttribute;
 
-		// The test resolves the image the same way a build does, so it has to send the mapping row the
-		// admin is looking at rather than the one the feed was last saved with.
+		// Send the image's mapping row as it is on screen, so the test checks the unsaved mapping rather
+		// than the saved one.
 		const imageMapping = () => {
 			const source = document.querySelector('[name="fieldMapping[' + imageAttribute + '][source]"]');
 			const defaultAsset = document.querySelector('[name="fieldMapping[' + imageAttribute + '][default][]"]');
+			const twig = document.querySelector('[name="fieldMapping[' + imageAttribute + '][twig]"]');
+
+			// The image row has no dropdown when the feed's source sets the image.
+			if (source === null) {
+				return {};
+			}
 
 			return {
 				[imageAttribute]: {
 					source: source.value,
 					default: defaultAsset === null ? '' : defaultAsset.value,
+					twig: twig.value,
 				},
 			};
 		};
@@ -149,7 +192,7 @@
 
 			testOutput.append(thumbnail, dimensionsParagraph);
 
-			// The platform may publish no minimum, in which case there is no verdict to give.
+			// Show the minimum-size line only when the platform publishes a minimum.
 			if (result.minimumWidth !== null) {
 				const verdict = document.createElement('p');
 				const params = { width: result.minimumWidth, height: result.minimumHeight };

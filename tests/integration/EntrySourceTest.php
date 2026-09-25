@@ -13,9 +13,9 @@ use fostercommerce\productfeeds\sources\FeedSource;
 class EntrySourceTest extends IntegrationTestCase
 {
 	/**
-	 * The source IDs go into the query as an OR of section/type pairs. An empty OR builds no condition
-	 * at all, which would put every entry on the site into the feed. The guard is the one line between a
-	 * misconfigured feed and publishing the whole CMS, so it is asserted against the real query.
+	 * The source IDs go into the query as an OR of section/type pairs. An empty OR doesn't build a condition,
+	 * and the query would then include every entry on the site. The guard is the one line between a
+	 * misconfigured feed and publishing the whole CMS, so the test asserts against the real query.
 	 */
 	public function testAFeedWithNoUsableSourcesReadsNothing(): void
 	{

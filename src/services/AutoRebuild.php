@@ -18,6 +18,7 @@ use fostercommerce\productfeeds\helpers\Mapping;
 use fostercommerce\productfeeds\models\Feed;
 use fostercommerce\productfeeds\models\WatchedFields;
 use fostercommerce\productfeeds\ProductFeeds;
+use fostercommerce\productfeeds\sources\CustomSource;
 use fostercommerce\productfeeds\sources\FeedSource;
 use Throwable;
 use yii\base\InvalidConfigException;
@@ -85,8 +86,8 @@ class AutoRebuild extends Component
 	 */
 	private function queueBuildsFor(ElementInterface $element, ElementChange $change): void
 	{
-		// Drafts, revisions and propagated saves are not the live element. `resaving` is Craft re-saving
-		// the whole catalog after a field layout edit, which nothing in the feed actually changed.
+		// Drafts, revisions and propagated saves are not the live element. `resaving` marks Craft re-saving
+		// the whole catalog after a field layout edit, which doesn't change a value the feed publishes.
 		if ($element->getIsDraft() || $element->getIsRevision() || $element->isProvisionalDraft || $element->propagating || $element->resaving) {
 			return;
 		}
@@ -148,6 +149,11 @@ class AutoRebuild extends Component
 			return $source->contains($element);
 		}
 
+		// Rebuild on every save, since a custom source's items can read any field.
+		if ($source instanceof CustomSource) {
+			return true;
+		}
+
 		$watched = $this->watchedFields($feed);
 
 		// The filter reads different values now, so the element may have just joined or left the feed.
@@ -157,6 +163,11 @@ class AutoRebuild extends Component
 			|| ($watched->hasRelationRule && $this->hasDirtyRelation($element))
 		) {
 			return true;
+		}
+
+		// Rebuild on every save of a member, since a Twig value can read any field.
+		if (in_array(Mapping::TWIG, array_column($feed->fieldMapping, 'source'), true)) {
+			return $source->contains($element);
 		}
 
 		return $this->hasRelevantEdit($element, $watched->mapped) && $source->contains($element);

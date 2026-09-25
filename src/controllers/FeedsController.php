@@ -17,12 +17,14 @@ use fostercommerce\productfeeds\enums\ImageEngine;
 use fostercommerce\productfeeds\enums\ImageFit;
 use fostercommerce\productfeeds\enums\Platform;
 use fostercommerce\productfeeds\enums\Source;
+use fostercommerce\productfeeds\errors\FeedBuildException;
 use fostercommerce\productfeeds\helpers\FeedEditVariables;
 use fostercommerce\productfeeds\helpers\FeedIndexTable;
 use fostercommerce\productfeeds\helpers\FilterCondition;
 use fostercommerce\productfeeds\helpers\Mapping;
 use fostercommerce\productfeeds\models\Feed;
 use fostercommerce\productfeeds\ProductFeeds;
+use fostercommerce\productfeeds\sources\CustomSource;
 use fostercommerce\productfeeds\sources\FeedSource;
 use Throwable;
 use Twig\Error\LoaderError;
@@ -112,10 +114,6 @@ class FeedsController extends Controller
 
 		$this->requireSiteAccess($feed);
 
-		if ($feed->id === null && $feed->fieldMapping === []) {
-			$feed->fieldMapping = FeedSource::forFeed($feed)->defaultMapping();
-		}
-
 		return $this->renderTemplate('product-feeds/_edit', FeedEditVariables::forFeed($feed, $this->siteOf($feed)));
 	}
 
@@ -144,6 +142,7 @@ class FeedsController extends Controller
 
 		$this->requireSiteAccess($feed);
 
+		$savedSource = $feed->source;
 		$this->applyPostedFeed($feed);
 		$feed->name = $this->toString($request->getBodyParam('name', ''));
 		$feed->handle = $this->toString($request->getBodyParam('handle', ''));
@@ -151,7 +150,15 @@ class FeedsController extends Controller
 
 		// The source is read from the post, so it can only be resolved once the fields above are applied.
 		$source = FeedSource::forFeed($feed);
-		$feed->filterCondition = FilterCondition::posted($source, $request->getBodyParam('filterCondition'));
+
+		// Start from the source's default mapping, since a new feed doesn't post a table and a changed source posts the
+		// old source's hidden one.
+		if (($feed->id === null && $feed->fieldMapping === []) || ($feed->id !== null && $feed->source !== $savedSource)) {
+			$feed->fieldMapping = $source->defaultMapping();
+		}
+
+		// Discard the filter rules for a custom source, since the hidden filter field still posts them.
+		$feed->filterCondition = $source instanceof CustomSource ? [] : FilterCondition::posted($source, $request->getBodyParam('filterCondition'));
 
 		$withoutUrls = $source->sourcesWithoutUrls();
 		if ($withoutUrls !== []) {
@@ -339,6 +346,7 @@ class FeedsController extends Controller
 				// Only someone who may edit can reach this action.
 				'readOnly' => false,
 			], View::TEMPLATE_MODE_CP),
+			'isCustomSource' => $source instanceof CustomSource,
 		]);
 	}
 
@@ -354,7 +362,7 @@ class FeedsController extends Controller
 	 * @throws SyntaxError
 	 * @throws Throwable
 	 */
-	public function actionPreview(): Response
+	public function actionPreview(): ?Response
 	{
 		$this->requirePostRequest();
 		$this->requireAcceptsJson();
@@ -362,12 +370,14 @@ class FeedsController extends Controller
 
 		$feed = $this->feedFromRequest();
 
+		try {
+			$variables = FeedEditVariables::forPreview($feed);
+		} catch (FeedBuildException $feedBuildException) {
+			return $this->asFailure($feedBuildException->getMessage());
+		}
+
 		return $this->asJson([
-			'html' => Craft::$app->getView()->renderTemplate(
-				'product-feeds/_includes/preview',
-				FeedEditVariables::forPreview($feed),
-				View::TEMPLATE_MODE_CP
-			),
+			'html' => Craft::$app->getView()->renderTemplate('product-feeds/_includes/preview', $variables, View::TEMPLATE_MODE_CP),
 		]);
 	}
 
@@ -410,7 +420,7 @@ class FeedsController extends Controller
 	 * @throws MethodNotAllowedHttpException
 	 * @throws NotFoundHttpException
 	 */
-	public function actionTestImage(): Response
+	public function actionTestImage(): ?Response
 	{
 		$this->requirePostRequest();
 		$this->requireAcceptsJson();
@@ -419,23 +429,36 @@ class FeedsController extends Controller
 		$feed = $this->postedFeed();
 		$this->requireSiteAccess($feed);
 
-		// The edit form posts no filter, and the test reads the first element the source returns. Without
-		// the saved filter that is the first element in the catalog, which the feed may never publish.
+		// Apply the saved filter, since the edit form doesn't post it and the test reads the first element the
+		// source returns. Without the filter, that element could be one the feed never publishes.
 		$feedId = $this->toInt($this->request->getBodyParam('feedId'));
 		if ($feedId !== 0) {
 			$saved = ProductFeeds::plugin()->getFeeds()->getFeedById($feedId) ?? throw new NotFoundHttpException();
 			$this->requireSiteAccess($saved);
 			$feed->filterCondition = $saved->filterCondition;
+
+			// Test the saved mapping for a user who cannot edit it, since a posted Twig value would run on the server.
+			if (! Craft::$app->getUser()->checkPermission(ProductFeeds::PERMISSION_EDIT)) {
+				$feed->fieldMapping = $saved->fieldMapping;
+			}
+		} else {
+			$this->requirePermission(ProductFeeds::PERMISSION_EDIT);
 		}
 
-		// The feed is never saved, so nothing else validates what this resolves an image URL from and then
-		// fetches server-side.
+		// Validate the posted mapping and image settings here, since the feed is never saved and the test
+		// fetches the image URL they produce.
 		if (! $feed->validate(['fieldMapping', 'imageEngine', 'imageFit'])) {
 			throw new BadRequestHttpException(implode(' ', $feed->getFirstErrors()));
 		}
 
+		try {
+			$result = ProductFeeds::plugin()->getBuilds()->testImage($feed);
+		} catch (FeedBuildException $feedBuildException) {
+			return $this->asFailure($feedBuildException->getMessage());
+		}
+
 		// `feed-edit.js` reads the result's public properties straight off the JSON.
-		return $this->asJson(ProductFeeds::plugin()->getBuilds()->testImage($feed));
+		return $this->asJson($result);
 	}
 
 	/**
@@ -460,7 +483,8 @@ class FeedsController extends Controller
 		$transform = $this->toString($request->getBodyParam('imageTransform'));
 
 		$feed->platform = $this->postedEnum('platform', Platform::values(), Platform::Google->value);
-		$feed->source = $this->postedEnum('source', Source::values(), Source::Variants->value);
+		// Keep an unregistered source as posted, for the model to reject on the Source field.
+		$feed->source = $this->toString($request->getBodyParam('source', Source::Variants->value));
 		$feed->sourceIds = $this->toStringList($request->getBodyParam('sourceIds'));
 		$feed->fieldMapping = Mapping::normalizeRows($request->getBodyParam('fieldMapping'));
 		$feed->imageEngine = $this->toString($request->getBodyParam('imageEngine', ImageEngine::None->value));
@@ -523,8 +547,8 @@ class FeedsController extends Controller
 	}
 
 	/**
-	 * The platform and the source are resolved through enums that throw, and both are read before the feed
-	 * is validated, so a value off the vocabulary has to be rejected as it is read.
+	 * The platform resolves through an enum that throws, and is read before the feed is validated, so a value
+	 * off the vocabulary has to be rejected as it is read.
 	 *
 	 * @param list<string> $range
 	 * @throws BadRequestHttpException

@@ -11,6 +11,7 @@ use craft\i18n\Locale;
 use DateTime;
 use fostercommerce\productfeeds\models\Feed;
 use fostercommerce\productfeeds\ProductFeeds;
+use fostercommerce\productfeeds\sources\FeedSource;
 use yii\base\Exception;
 use yii\base\InvalidConfigException;
 
@@ -44,7 +45,7 @@ final class FeedIndexTable
 				'url' => $feed->getCpEditUrl(),
 				'feedStatus' => Cp::componentStatusLabelHtml($feed),
 				'platform' => Html::encode($feed->getPlatform()->label()),
-				'source' => Html::encode($feed->getSource()->label()),
+				'source' => Html::encode(FeedSource::label($feed->source)),
 				'lastBuilt' => [
 					'label' => Html::encode($status->label()),
 					'at' => $finishedAt instanceof DateTime

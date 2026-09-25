@@ -50,6 +50,14 @@ enum StandardAttribute: string
 
 	case GoogleProductCategory = 'google_product_category';
 
+	case Color = 'color';
+
+	case Size = 'size';
+
+	case Material = 'material';
+
+	case Pattern = 'pattern';
+
 	case CustomLabel0 = 'custom_label_0';
 
 	case CustomLabel1 = 'custom_label_1';
@@ -123,6 +131,8 @@ enum StandardAttribute: string
 			self::Description => 5000,
 			self::Brand, self::Mpn => 70,
 			self::ProductType => 750,
+			self::Color, self::Size, self::Pattern => 100,
+			self::Material => 200,
 			self::CustomLabel0, self::CustomLabel1, self::CustomLabel2, self::CustomLabel3, self::CustomLabel4 => 100,
 			default => null,
 		};

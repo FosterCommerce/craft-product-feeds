@@ -42,7 +42,28 @@ class ProductFeeds extends BasePlugin
 
 	public const PERMISSION_BUILD = 'productFeeds:build';
 
-	public string $schemaVersion = '1.0.0';
+	/**
+	 * @event RegisterComponentTypesEvent The event that is triggered when registering the sources a feed can read.
+	 *
+	 * Each class must extend [[\fostercommerce\productfeeds\sources\CustomSource]].
+	 *
+	 * ```php
+	 * use craft\events\RegisterComponentTypesEvent;
+	 * use fostercommerce\productfeeds\ProductFeeds;
+	 * use yii\base\Event;
+	 *
+	 * Event::on(
+	 *     ProductFeeds::class,
+	 *     ProductFeeds::EVENT_REGISTER_SOURCES,
+	 *     function(RegisterComponentTypesEvent $event) {
+	 *         $event->types[] = MySource::class;
+	 *     }
+	 * );
+	 * ```
+	 */
+	public const EVENT_REGISTER_SOURCES = 'registerSources';
+
+	public string $schemaVersion = '1.1.0';
 
 	public bool $hasCpSection = true;
 

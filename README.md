@@ -1,22 +1,30 @@
-![Screenshot](resources/images/header.png)
+![Product Feeds](resources/img/header.png)
 
 # Product Feeds
 
-Build auto-updating **product feeds** for shopping and social platforms from Craft Commerce variants or Craft entries.
+Build auto-updating **product feeds** for shopping and social platforms from Craft Commerce variants, Craft entries, or custom sources.
 
-## What it does
+## Overview
 
-- Supports Google, Klaviyo, Meta, Microsoft, Pinterest, and TikTok, one feed per platform.
-- Serves each feed from a stable URL. You paste it into the platform once, and the platform fetches it on a schedule.
-- Builds from your Commerce variants, taking SKU, price, and stock availability straight from Commerce, or from your Craft entries when the thing you advertise is a page rather than a product.
-- Rebuilds a feed when someone edits a product in it, so a price change is live at the feed URL without waiting for the next scheduled build.
-- Lists the products the last build left out and why, downloadable as a CSV.
-- Previews the items a feed would contain, and checks your first image against the platform's size minimum.
-- Narrows a feed to part of your catalog, so one product type can drive several feeds (one per brand, one for everything on promotion).
+- Publish feeds for Google, Meta, Microsoft, Pinterest, TikTok, and Klaviyo, each from a stable URL the platform fetches on a schedule.
+- Build a feed from Commerce variants, with SKU, price, and stock taken from Commerce, or from entries when you advertise a page rather than a product.
+- Write a custom source in a module or plugin to publish items the built-in sources cannot, such as one item for each size an entry offers.
+- Map each platform attribute to a product property, a Craft field, a default value, or a Twig template.
+- Check a feed before the platform does: preview its items, see which attributes were blank or invalid on the last build, and test an image against the platform's minimum size.
+- Keep each feed current, rebuilt on a schedule and whenever a product or entry in it changes.
+- Split one catalog across several feeds (one per brand, one for items on promotion).
+
+## Use Product Feeds when
+
+- Your products have to appear on Google, Meta, Microsoft, Pinterest, TikTok, or Klaviyo, and each feed has to stay current as the catalog changes.
+- What you advertise is an entry rather than a Commerce product, such as a configurator or made-to-measure page.
+- Your catalog does not match one item per product, such as one entry sold in several sizes, and a module or plugin can supply the items.
+- A few attribute values need a different shape than your fields hold, such as a combined title or a computed date.
+- The people who maintain the feed need to see blank or invalid values before the platform reports them.
 
 ## Requirements
 
-- Craft CMS `^5.2.0`
+- Craft CMS `^5.9.0`
 - Craft Commerce `^5.5.0`
 - PHP `^8.2` with the `json`, `zlib`, and `xmlwriter` extensions
 
@@ -29,42 +37,36 @@ composer require fostercommerce/product-feeds
 
 Then choose a filesystem under **Settings -> Plugins -> Product Feeds**, and schedule the build command.
 
-See [`docs/installation.md`](./docs/installation.md) for the full guide.
+For the full guide, see [installation](./docs/installation.md).
 
 ## Platforms
 
-A feed's platform decides which attributes it carries, how they are worded, and how large its images have to be. Google and Microsoft accept an item with no brand, GTIN, or MPN, and say so in the feed; Meta and TikTok require a brand.
+Each feed targets one platform: Google, Meta, Microsoft, Pinterest, TikTok, or Klaviyo. The platform sets which attributes the feed has, and the maximum length of each text value.
 
-The five shopping platforms take the same RSS document. Klaviyo takes a JSON catalog instead, carrying stock as a number rather than an availability string, and is added in Klaviyo as a Catalog Source.
+Each feed also has its own image engine and size, so a Pinterest feed can send portrait images while a Google feed sends square ones from the same Assets field. The image engine can be the asset's own URL, a Craft transform, Imager X, or Small Pics.
 
-See [attributes](./docs/reference/attributes.md) for what each platform sends and where each value comes from.
+For what each platform sends, see [attributes](./docs/reference/attributes.md).
+
+## Sources
+
+A feed's data can come from Commerce variants, with SKU, price, and stock from Commerce, or from entries when you advertise a page rather than a product. To limit a feed to part of the catalog, add rules to its **Filter**.
+
+For anything else, a developer can write a [custom source](./docs/dev-guide/custom-sources.md).
 
 ## Mapping
 
-Every attribute a platform defines gets a row, and you say where its value comes from: a native value such as the product title or URL, a Craft field, or the same default on every item. A variant feed takes its Commerce attributes from Commerce and does not ask you for them. Each attribute offers only the field types that can feed it, so `image_link` takes an Assets field and `price` takes a Number field.
+Each attribute can get mapped to a native value, a Craft field, a default value, or a Twig template. After each build, every attribute reports how many items were blank or invalid, and **Excluded items** lists what the build left out and why.
 
-You can narrow a feed with Craft's condition builder, the one you already use on an element index.
-
-See [mapping a feed](./docs/user-guide/mapping.md).
-
-## Images
-
-Each feed carries its own image engine and size, so a Pinterest feed can carry the portrait image it demands while a Google feed carries a square one from the same asset field. Craft transforms, Imager X, and Small Pics are all supported, and each appears once its plugin is installed.
-
-See [images](./docs/user-guide/mapping.md#images).
-
-## Permissions
-
-- `productFeeds:view`: see feeds, their mapping, their data issues, and the feed URL.
-- `productFeeds:edit`: create, edit, duplicate, reorder, and delete feeds, and rotate a feed's URL.
-- `productFeeds:build`: build a feed now, preview one, and test an image.
-
-See [permissions](./docs/reference/permissions.md).
+For the full guide, see [mapping a feed](./docs/user-guide/mapping.md).
 
 ## Documentation
 
-See [`docs/`](./docs/index.md).
+For the full documentation, see the [Product Feeds documentation](https://www.fostercommerce.com/craft-cms-plugins/product-feeds/docs).
 
 ## License
 
-Proprietary. See [LICENSE.md](./LICENSE.md).
+Proprietary
+
+---
+
+<a href="https://www.fostercommerce.com" target="_blank"><img src="./resources/img/foster-commerce.svg" alt="Foster Commerce" width="160" height="40"></a>

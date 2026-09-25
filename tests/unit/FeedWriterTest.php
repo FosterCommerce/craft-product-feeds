@@ -44,8 +44,8 @@ class FeedWriterTest extends WriterTestCase
 
 	/**
 	 * The `.xml` route inflates the stored artifact as it streams. `zlib.inflate` reads only the
-	 * first gzip member, so a build that ever concatenated members would silently serve a truncated
-	 * feed. This is the regression test for that.
+	 * first gzip member, so a build that concatenated members would serve a truncated feed without an
+	 * error. The test fails if a build concatenates members.
 	 */
 	public function testInflateFilterRecoversTheWholeDocument(): void
 	{

@@ -10,6 +10,7 @@ use craft\base\FieldInterface;
 use craft\base\RelationalFieldInterface;
 use craft\elements\conditions\ElementCondition;
 use craft\elements\db\ElementQueryInterface;
+use craft\events\RegisterComponentTypesEvent;
 use craft\models\FieldLayout;
 use fostercommerce\productfeeds\enums\AttributeKind;
 use fostercommerce\productfeeds\enums\Source;
@@ -20,6 +21,7 @@ use fostercommerce\productfeeds\helpers\FilterCondition;
 use fostercommerce\productfeeds\helpers\Mapping;
 use fostercommerce\productfeeds\models\Feed;
 use fostercommerce\productfeeds\models\ImageTransform;
+use fostercommerce\productfeeds\ProductFeeds;
 use Throwable;
 use yii\base\Exception;
 use yii\base\InvalidConfigException;
@@ -48,12 +50,96 @@ abstract class FeedSource
 		$this->feedValue = new FeedValue($feed->getSiteBaseUrl());
 	}
 
+	/**
+	 * @throws InvalidConfigException
+	 */
 	public static function forFeed(Feed $feed): self
 	{
-		return match ($feed->getSource()) {
-			Source::Variants => new VariantSource($feed),
-			Source::Entries => new EntrySource($feed),
-		};
+		$builtInSource = Source::tryFrom($feed->source);
+		if ($builtInSource instanceof Source) {
+			return match ($builtInSource) {
+				Source::Variants => new VariantSource($feed),
+				Source::Entries => new EntrySource($feed),
+			};
+		}
+
+		$customSource = self::customSources()[$feed->source] ?? MissingSource::class;
+
+		return new $customSource($feed);
+	}
+
+	/**
+	 * The custom sources registered through `ProductFeeds::EVENT_REGISTER_SOURCES`, by handle.
+	 *
+	 * @return array<string, class-string<CustomSource>>
+	 * @throws InvalidConfigException if a registered class does not extend `CustomSource`, or its handle is taken
+	 */
+	public static function customSources(): array
+	{
+		$event = new RegisterComponentTypesEvent();
+		ProductFeeds::plugin()->trigger(ProductFeeds::EVENT_REGISTER_SOURCES, $event);
+
+		$customSources = [];
+
+		foreach ($event->types as $type) {
+			if (! is_subclass_of($type, CustomSource::class)) {
+				throw new InvalidConfigException(sprintf("Feed source class '%s' does not extend '%s'.", $type, CustomSource::class));
+			}
+
+			$handle = $type::handle();
+			if (Source::tryFrom($handle) instanceof Source || isset($customSources[$handle])) {
+				throw new InvalidConfigException(sprintf("Feed source handle '%s' of '%s' is already in use.", $handle, $type));
+			}
+
+			$customSources[$handle] = $type;
+		}
+
+		return $customSources;
+	}
+
+	/**
+	 * @return list<string>
+	 * @throws InvalidConfigException
+	 */
+	public static function values(): array
+	{
+		return array_column(self::options(), 'value');
+	}
+
+	/**
+	 * Every source a feed can use, built-in first.
+	 *
+	 * @return list<array{value: string, label: string}>
+	 * @throws InvalidConfigException
+	 */
+	public static function options(): array
+	{
+		$options = array_map(
+			static fn (Source $source): array => [
+				'value' => $source->value,
+				'label' => $source->label(),
+			],
+			Source::cases(),
+		);
+
+		foreach (self::customSources() as $handle => $customSource) {
+			$options[] = [
+				'value' => $handle,
+				'label' => $customSource::displayName(),
+			];
+		}
+
+		return $options;
+	}
+
+	/**
+	 * @throws InvalidConfigException
+	 */
+	public static function label(string $source): string
+	{
+		return array_column(self::options(), 'label', 'value')[$source] ?? Craft::t(ProductFeeds::HANDLE, 'source.missing', [
+			'source' => $source,
+		]);
 	}
 
 	/**
@@ -163,6 +249,39 @@ abstract class FeedSource
 	}
 
 	/**
+	 * The variables a Twig value can use, with a description of each.
+	 *
+	 * @return array<string, string>
+	 */
+	abstract public function twigVariables(): array;
+
+	/**
+	 * The items one element returns. The default is one item, mapped as usual.
+	 *
+	 * @return list<SuppliedItem>
+	 */
+	public function items(ElementInterface $element): array
+	{
+		return [new SuppliedItem()];
+	}
+
+	/**
+	 * Normalize a value to the attribute's kind, transforming images with the feed's engine.
+	 *
+	 * @return list<string>
+	 * @throws InvalidConfigException
+	 */
+	public function normalizeValue(mixed $value, AttributeDefinition $attributeDefinition): array
+	{
+		return $this->feedValue->normalize(
+			$value,
+			$attributeDefinition->attributeKind,
+			$this->imageTransform(),
+			$attributeDefinition->maxLength
+		);
+	}
+
+	/**
 	 * @return class-string<ElementInterface>
 	 */
 	abstract public function elementType(): string;
@@ -247,12 +366,7 @@ abstract class FeedSource
 			default => null,
 		};
 
-		return $this->feedValue->normalize(
-			$value,
-			$attributeDefinition->attributeKind,
-			$this->imageTransform(),
-			$attributeDefinition->maxLength
-		);
+		return $this->normalizeValue($value, $attributeDefinition);
 	}
 
 	/**

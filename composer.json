@@ -1,6 +1,6 @@
 {
 	"name": "fostercommerce/product-feeds",
-	"description": "Build auto-updating product feeds for shopping and social platforms from Craft Commerce variants or Craft entries.",
+	"description": "Build auto-updating product feeds for shopping and social platforms from Craft Commerce variants, Craft entries, or custom sources.",
 	"homepage": "https://github.com/FosterCommerce/craft-product-feeds",
 	"type": "craft-plugin",
 	"keywords": [
@@ -45,7 +45,7 @@
 		"ext-json": "*",
 		"ext-xmlwriter": "*",
 		"ext-zlib": "*",
-		"craftcms/cms": "^5.2.0",
+		"craftcms/cms": "^5.9.0",
 		"craftcms/commerce": "^5.5.0",
 		"moneyphp/money": "^4.0"
 	},

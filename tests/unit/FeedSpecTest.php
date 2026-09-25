@@ -193,7 +193,7 @@ class FeedSpecTest extends TestCase
 	}
 
 	/**
-	 * `preorder` carries no underscore, so the spaced platforms leave it alone.
+	 * `preorder` has no underscore, so the spaced platforms leave it alone.
 	 */
 	public function testPreorderSurvivesTheAvailabilityRewrite(): void
 	{
@@ -344,8 +344,18 @@ class FeedSpecTest extends TestCase
 	{
 		$attributes = (new GoogleFeed())->attributes();
 
-		$this->assertSame(['in_stock', 'out_of_stock', 'preorder'], $attributes['availability']->values);
+		$this->assertSame(['in_stock', 'out_of_stock', 'preorder', 'backorder'], $attributes['availability']->values);
 		$this->assertSame(['new', 'refurbished', 'used'], $attributes['condition']->values);
+	}
+
+	public function testOnlyGoogleOffersBackorder(): void
+	{
+		$this->assertArrayHasKey('availability_date', (new GoogleFeed())->attributes());
+
+		foreach ([new MetaFeed(), new MicrosoftFeed(), new PinterestFeed(), new TikTokFeed()] as $spec) {
+			$this->assertNotContains('backorder', $spec->attributes()['availability']->values);
+			$this->assertArrayNotHasKey('availability_date', $spec->attributes());
+		}
 	}
 
 	public function testFreeTextAttributesCarryNoVocabulary(): void

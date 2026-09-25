@@ -32,8 +32,8 @@ final class FilterCondition
 	}
 
 	/**
-	 * Built against the element type the builder rendered against, not the item's type: Craft drops any
-	 * rule whose element type has no matching field, which would lose a variant feed's product-field rules.
+	 * Built against the element type the builder rendered against, not the item's type: Craft drops a
+	 * rule with no matching field on the element type, and a variant feed would lose its product-field rules.
 	 *
 	 * @return array<string, mixed> config to store on the feed
 	 */

@@ -7,8 +7,8 @@ namespace fostercommerce\productfeeds\enums;
 /**
  * The backing values of a string enum, for the validators that range over them.
  *
- * Commerce's own `EnumHelpersTrait` does the same, but types its return as a plain array, which loses
- * the shape the validators are checked against.
+ * Commerce's own `EnumHelpersTrait` does the same, but types its return as a plain array. A plain array
+ * loses the shape the validators are checked against.
  */
 trait EnumValuesTrait
 {

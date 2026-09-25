@@ -12,6 +12,11 @@ namespace fostercommerce\productfeeds\models;
 final class BuildDiagnostics
 {
 	/**
+	 * The skip reason for an item whose id an earlier item already used.
+	 */
+	public const DUPLICATE_ID = 'duplicateId';
+
+	/**
 	 * Enough to spot a pattern in the CP without carrying the whole catalog in a JSON column. The CSV
 	 * report is the full list.
 	 */
@@ -26,6 +31,18 @@ final class BuildDiagnostics
 	 * @var array<string, int>
 	 */
 	public array $blankByAttribute = [];
+
+	/**
+	 * @var array<string, int>
+	 */
+	public array $twigErrorsByAttribute = [];
+
+	/**
+	 * The first error message per attribute, since the rest usually repeat it.
+	 *
+	 * @var array<string, string>
+	 */
+	public array $sampleTwigErrors = [];
 
 	/**
 	 * @var array<string, int>
@@ -52,6 +69,12 @@ final class BuildDiagnostics
 	public function countSkipped(string $attribute): void
 	{
 		$this->skippedByAttribute[$attribute] = ($this->skippedByAttribute[$attribute] ?? 0) + 1;
+	}
+
+	public function countTwigError(string $attribute, string $message): void
+	{
+		$this->twigErrorsByAttribute[$attribute] = ($this->twigErrorsByAttribute[$attribute] ?? 0) + 1;
+		$this->sampleTwigErrors[$attribute] ??= $message;
 	}
 
 	public function countBlank(string $attribute): void
@@ -96,6 +119,10 @@ final class BuildDiagnostics
 		$skippedByAttribute = is_array($stored['skippedByAttribute'] ?? null) ? $stored['skippedByAttribute'] : [];
 		/** @var array<string, int> $blankByAttribute */
 		$blankByAttribute = is_array($stored['blankByAttribute'] ?? null) ? $stored['blankByAttribute'] : [];
+		/** @var array<string, int> $twigErrorsByAttribute */
+		$twigErrorsByAttribute = is_array($stored['twigErrorsByAttribute'] ?? null) ? $stored['twigErrorsByAttribute'] : [];
+		/** @var array<string, string> $sampleTwigErrors */
+		$sampleTwigErrors = is_array($stored['sampleTwigErrors'] ?? null) ? $stored['sampleTwigErrors'] : [];
 		/** @var array<string, int> $invalidByAttribute */
 		$invalidByAttribute = is_array($stored['invalidByAttribute'] ?? null) ? $stored['invalidByAttribute'] : [];
 		/** @var array<string, int> $relativeUrlByAttribute */
@@ -107,6 +134,8 @@ final class BuildDiagnostics
 
 		$diagnostics->skippedByAttribute = $skippedByAttribute;
 		$diagnostics->blankByAttribute = $blankByAttribute;
+		$diagnostics->twigErrorsByAttribute = $twigErrorsByAttribute;
+		$diagnostics->sampleTwigErrors = $sampleTwigErrors;
 		$diagnostics->invalidByAttribute = $invalidByAttribute;
 		$diagnostics->relativeUrlByAttribute = $relativeUrlByAttribute;
 		$diagnostics->sampleSkipped = $sampleSkipped;
@@ -126,6 +155,8 @@ final class BuildDiagnostics
 		return [
 			'skippedByAttribute' => $this->skippedByAttribute,
 			'blankByAttribute' => $this->blankByAttribute,
+			'twigErrorsByAttribute' => $this->twigErrorsByAttribute,
+			'sampleTwigErrors' => $this->sampleTwigErrors,
 			'invalidByAttribute' => $this->invalidByAttribute,
 			'relativeUrlByAttribute' => $this->relativeUrlByAttribute,
 			'sampleSkipped' => $this->sampleSkipped,

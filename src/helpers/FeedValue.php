@@ -51,7 +51,7 @@ final class FeedValue
 	{
 		// The two guards catch different values. MoneyPHP reads an empty string as zero, and `is_numeric()`
 		// rejects it; `is_numeric()` accepts a leading `+` and exponent notation, and MoneyPHP throws on
-		// both. An unparseable price has to become a blank, which excludes the one item, where an escaping
+		// both. Turn an unparseable price into a blank, which excludes only that item. An escaping
 		// exception would fail the whole build.
 		if (! is_numeric($amount)) {
 			return null;
