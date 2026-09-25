@@ -23,7 +23,7 @@ abstract class FeedSpec
 	protected const DOC_URL = null;
 
 	/**
-	 * Smallest image the platform accepts, as `[width, height]`, or null where it publishes no minimum.
+	 * Smallest image the platform accepts, as `[width, height]`, or null where it doesn't publish a minimum.
 	 *
 	 * @var array{0: int, 1: int}|null
 	 */

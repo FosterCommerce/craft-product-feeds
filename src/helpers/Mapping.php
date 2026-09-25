@@ -19,10 +19,20 @@ final class Mapping
 	public const USE_DEFAULT = 'usedefault';
 
 	/**
+	 * A Twig template the admin writes, rendered per item with the element as `object`.
+	 */
+	public const TWIG = 'twig';
+
+	/**
 	 * The gallery attribute's default: the `image_link` source's images after the first, up to the
 	 * platform's gallery limit.
 	 */
 	public const IMAGE_OVERFLOW = 'imageoverflow';
+
+	/**
+	 * Mapping sources that never read the default value.
+	 */
+	public const SOURCES_WITHOUT_DEFAULT = ['', self::NO_INCLUDE, self::IMAGE_OVERFLOW, self::TWIG];
 
 	public const ELEMENT = 'element';
 
@@ -38,7 +48,7 @@ final class Mapping
 	 */
 	public static function parse(string $source): array
 	{
-		if (in_array($source, [self::USE_DEFAULT, self::IMAGE_OVERFLOW], true)) {
+		if (in_array($source, [self::USE_DEFAULT, self::IMAGE_OVERFLOW, self::TWIG], true)) {
 			return [
 				'kind' => $source,
 				'value' => '',
@@ -64,7 +74,7 @@ final class Mapping
 	}
 
 	/**
-	 * @return array<string, array{source: string, default: string}>
+	 * @return array<string, array{source: string, default: string, twig: string}>
 	 */
 	public static function normalizeRows(mixed $value): array
 	{
@@ -82,6 +92,7 @@ final class Mapping
 			$rows[(string) $attribute] = [
 				'source' => self::scalar($row['source'] ?? ''),
 				'default' => self::scalar($row['default'] ?? ''),
+				'twig' => self::scalar($row['twig'] ?? ''),
 			];
 		}
 

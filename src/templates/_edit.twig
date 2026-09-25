@@ -36,41 +36,39 @@
 {% set hideImageSize = feed.imageEngine == 'none' or usingNamedCraftTransform %}
 
 {% block actionButton %}
-	<div class="btngroup">
-		{% if not readOnly %}
-			<button type="submit" class="btn submit">{{ 'Save'|t('app') }}</button>
+	<div class="flex">
+		{% if feed.id and canBuild %}
+			{# Not a `formsubmit`: a user with Build but not Edit gets a read-only page, which has no
+			   form to submit the action. The JS posts the action itself. #}
+			<button id="build-now" class="btn" type="button" data-feed-id="{{ feed.id }}">
+				{{ 'feed.buildNow'|t('product-feeds') }}
+			</button>
 		{% endif %}
-		{% if feed.id and (canBuild or not readOnly) %}
-			<button type="button" class="btn submit menubtn" aria-label="{{ 'Actions'|t('app') }}"></button>
-			<div class="menu">
-				<ul>
-					{% if canBuild %}
-						<li>
-							{# Not a `formsubmit`: a user with Build but not Edit gets a read-only page, which has no
-							   form for one to submit. The JS posts the action itself. #}
-							<button id="build-now" class="menu-item" type="button" data-feed-id="{{ feed.id }}">
-								{{ 'feed.buildNow'|t('product-feeds') }}
-							</button>
-						</li>
-					{% endif %}
-					{% if not readOnly %}
-						<li>
-							<button class="menu-item formsubmit" type="button"
-								data-action="product-feeds/feeds/duplicate"
-								data-param="feedId" data-value="{{ feed.id }}">
-								{{ 'feed.duplicate'|t('product-feeds') }}
-							</button>
-						</li>
-						<li>
-							<button class="menu-item formsubmit" type="button"
-								data-action="product-feeds/feeds/rotate-token"
-								data-param="feedId" data-value="{{ feed.id }}"
-								data-confirm="{{ 'feed.rotateTokenConfirm'|t('product-feeds') }}">
-								{{ 'feed.rotateToken'|t('product-feeds') }}
-							</button>
-						</li>
-					{% endif %}
-				</ul>
+		{% if feed.id and not readOnly %}
+			<button class="btn formsubmit" type="button"
+				data-action="product-feeds/feeds/rotate-token"
+				data-param="feedId" data-value="{{ feed.id }}"
+				data-confirm="{{ 'feed.rotateTokenConfirm'|t('product-feeds') }}">
+				{{ 'feed.rotateToken'|t('product-feeds') }}
+			</button>
+		{% endif %}
+		{% if not readOnly %}
+			<div class="btngroup">
+				<button type="submit" class="btn submit">{{ 'Save'|t('app') }}</button>
+				{% if feed.id %}
+					<button type="button" class="btn submit menubtn" aria-label="{{ 'Actions'|t('app') }}"></button>
+					<div class="menu">
+						<ul>
+							<li>
+								<button class="menu-item formsubmit" type="button"
+									data-action="product-feeds/feeds/duplicate"
+									data-param="feedId" data-value="{{ feed.id }}">
+									{{ 'feed.duplicate'|t('product-feeds') }}
+								</button>
+							</li>
+						</ul>
+					</div>
+				{% endif %}
 			</div>
 		{% endif %}
 	</div>
@@ -134,10 +132,11 @@
 			name: 'source',
 			options: sourceOptions,
 			value: feed.source,
+			errors: feed.getErrors('source'),
 			disabled: readOnly,
 		}) }}
 
-		<div id="source-ids">
+		<div id="source-ids" class="{{ isCustomSource ? 'hidden' }}">
 			{% include 'product-feeds/_includes/source-ids' %}
 		</div>
 
@@ -207,7 +206,7 @@
 				</div>
 			</div>
 
-			{% if feed.siteId and canBuild %}
+			{% if feed.id and canBuild %}
 				<div id="image-test" class="{{ feed.imageEngine == 'none' ? 'hidden' }}">
 					<button id="test-image" type="button" class="btn" data-image-attribute="{{ imageAttribute }}" data-feed-id="{{ feed.id }}">{{ 'imageTest.button'|t('product-feeds') }}</button>
 					<div id="image-test-output"></div>
@@ -228,125 +227,170 @@
 	</div>
 
 	<div id="mapping" class="hidden">
-		{% if unmappedRequired %}
-			<p class="warning has-icon">
-				<span class="icon" aria-hidden="true"></span>
-				<span class="visually-hidden">{{ 'Warning:'|t('app') }}</span>
-				<span>{{ 'error.requiredAttributesUnmapped'|t('product-feeds', { attributes: unmappedRequired|join(', ') }) }}</span>
-			</p>
-		{% endif %}
-
-		{% for error in feed.getErrors('fieldMapping') %}
-			<p class="error">{{ error }}</p>
-		{% endfor %}
-
-		<table class="data fullwidth pf-mapping-table">
-			<thead>
-				<tr>
-					<th scope="col">{{ 'mapping.attributeColumn'|t('product-feeds') }}</th>
-					<th scope="col">{{ 'mapping.sourceColumn'|t('product-feeds') }}</th>
-					<th scope="col">{{ 'mapping.defaultColumn'|t('product-feeds') }}</th>
-					<th scope="col">{{ 'mapping.dataIssuesColumn'|t('product-feeds') }}</th>
-				</tr>
-			</thead>
-			<tbody>
-				{% for row in mappingRows %}
-					<tr>
-						<th scope="row">
-							<code>{{ row.name }}</code>
-							{% if row.required %}<span class="required" aria-hidden="true"></span>{% endif %}
-							{% if row.note %}<span class="info">{{ row.note|t('product-feeds') }}</span>{% endif %}
-
-							{% if row.docUrl %}
-								<div class="instructions pf-attribute-doc">
-									<a class="go" href="{{ row.docUrl }}" target="_blank" rel="noopener">
-										{{ 'mapping.docLink'|t('product-feeds', { platform: feed.getPlatform().label() }) }}
-									</a>
-								</div>
-							{% endif %}
-						</th>
-						<td>
-							{{ forms.select({
-								name: 'fieldMapping[' ~ row.name ~ '][source]',
-								options: row.sourceOptions,
-								value: row.source,
-								disabled: readOnly,
-							}) }}
-						</td>
-						<td>
-							{% if row.defaultKind == 'none' %}
-								<span class="light">-</span>
-							{% elseif row.defaultKind == 'image' %}
-								{{ forms.elementSelect({
-									name: 'fieldMapping[' ~ row.name ~ '][default]',
-									elementType: 'craft\\elements\\Asset',
-									selectionLabel: 'mapping.chooseDefaultImage'|t('product-feeds'),
-									criteria: { kind: 'image' },
-									limit: 1,
-									elements: defaultImage ? [defaultImage] : [],
-									disabled: readOnly,
-								}) }}
-							{% elseif row.defaultKind == 'select' %}
-								{{ forms.select({
-									name: 'fieldMapping[' ~ row.name ~ '][default]',
-									options: row.defaultOptions,
-									value: row.default,
-									disabled: readOnly,
-								}) }}
-							{% else %}
-								{{ forms.text({
-									name: 'fieldMapping[' ~ row.name ~ '][default]',
-									value: row.default,
-									disabled: readOnly,
-								}) }}
-							{% endif %}
-						</td>
-						<td>
-							{% if row.blanks %}
-								<div class="error">{{ 'mapping.blankItems'|t('product-feeds', { n: row.blanks }) }}</div>
-							{% endif %}
-							{% if row.invalid %}
-								<div class="warning">{{ 'mapping.nonPositivePrice'|t('product-feeds', { n: row.invalid }) }}</div>
-							{% endif %}
-							{% if row.relativeUrls %}
-								<div class="warning">{{ row.relativeUrlMessage }}</div>
-								{% if row.relativeUrlSample %}
-									<div class="light code">{{ row.relativeUrlSample }}</div>
-								{% endif %}
-							{% endif %}
-							{% if not row.blanks and not row.invalid and not row.relativeUrls %}
-								{% if row.setOnAllItems %}
-									<div class="success">{{ 'mapping.setOnAllItems'|t('product-feeds', { n: row.setOnAllItems }) }}</div>
-								{% else %}
-									<span class="light">-</span>
-								{% endif %}
-							{% endif %}
-						</td>
-					</tr>
-				{% endfor %}
-			</tbody>
-		</table>
-
-		{% set mappingNote = spec.mappingNote() %}
-		{% if mappingNote %}
-			<p class="light">{{ mappingNote|t('product-feeds') }}</p>
-		{% endif %}
-
-		{% include 'product-feeds/_includes/excluded-products' %}
-
-		<hr>
-
-		<h2>{{ 'preview.heading'|t('product-feeds') }}</h2>
-
-		{% if feed.id and canBuild %}
-			<p class="light">{{ 'preview.instructions'|t('product-feeds') }}</p>
-			<button id="preview-feed" type="button" class="btn" data-feed-id="{{ feed.id }}">{{ 'preview.button'|t('product-feeds') }}</button>
-			<div id="preview-output"></div>
-		{% else %}
+		{% if not feed.id %}
 			<p class="notice has-icon">
 				<span class="icon" aria-hidden="true"></span>
-				<span>{{ 'preview.saveFirst'|t('product-feeds') }}</span>
+				<span>{{ 'mapping.saveFirst'|t('product-feeds') }}</span>
 			</p>
+		{% else %}
+			<p id="mapping-stale" class="notice has-icon hidden">
+				<span class="icon" aria-hidden="true"></span>
+				<span>{{ 'mapping.stale'|t('product-feeds') }}</span>
+			</p>
+
+			<div id="mapping-fields">
+			{% if unmappedRequired %}
+				<p class="warning has-icon">
+					<span class="icon" aria-hidden="true"></span>
+					<span class="visually-hidden">{{ 'Warning:'|t('app') }}</span>
+					<span>{{ 'error.requiredAttributesUnmapped'|t('product-feeds', { attributes: unmappedRequired|join(', ') }) }}</span>
+				</p>
+			{% endif %}
+
+			{% for error in feed.getErrors('fieldMapping') %}
+				<p class="error">{{ error }}</p>
+			{% endfor %}
+
+			{% set twigVariablesHelp %}
+				<p>{{ 'mapping.twigVariables'|t('product-feeds') }}</p>
+				<ul>
+					{% for variable, description in twigVariables %}
+						<li><code>{{ '{{ ' ~ variable ~ ' }}' }}</code> {{ description }}</li>
+					{% endfor %}
+				</ul>
+			{% endset %}
+
+			<table class="data fullwidth pf-mapping-table" data-sources-without-default="{{ sourcesWithoutDefault|json_encode }}">
+				<thead>
+					<tr>
+						<th scope="col">{{ 'mapping.attributeColumn'|t('product-feeds') }}</th>
+						<th scope="col">{{ 'mapping.sourceColumn'|t('product-feeds') }}</th>
+						<th scope="col">{{ 'mapping.defaultColumn'|t('product-feeds') }}</th>
+						<th scope="col">{{ 'mapping.dataIssuesColumn'|t('product-feeds') }}</th>
+					</tr>
+				</thead>
+				<tbody>
+					{% for row in mappingRows %}
+						<tr>
+							<th scope="row">
+								<code>{{ row.name }}</code>
+								{% if row.required %}<span class="required" aria-hidden="true"></span>{% endif %}
+								{% if row.note %}<span class="info">{{ row.note|t('product-feeds') }}</span>{% endif %}
+
+								{% if row.docUrl %}
+									<div class="instructions pf-attribute-doc">
+										<a class="go" href="{{ row.docUrl }}" target="_blank" rel="noopener">
+											{{ 'mapping.docLink'|t('product-feeds', { platform: feed.getPlatform().label() }) }}
+										</a>
+									</div>
+								{% endif %}
+							</th>
+							<td>
+								{% if row.setBy %}
+									<span class="light">{{ row.setBy }}</span>
+								{% else %}
+									{{ forms.select({
+										name: 'fieldMapping[' ~ row.name ~ '][source]',
+										options: row.sourceOptions,
+										value: row.source,
+										disabled: readOnly,
+									}) }}
+								{% endif %}
+							</td>
+							<td>
+								{% if not row.setBy %}
+									<div class="pf-twig-value flex flex-nowrap {{ row.source != 'twig' ? 'hidden' }}">
+										<div class="flex-grow">
+											{{ forms.textarea({
+												name: 'fieldMapping[' ~ row.name ~ '][twig]',
+												value: row.twig,
+												class: 'code',
+												rows: 2,
+												placeholder: '{{ title }}',
+												disabled: readOnly,
+											}) }}
+										</div>
+										<span class="info">{{ twigVariablesHelp }}</span>
+									</div>
+								{% endif %}
+								{% if row.defaultKind == 'none' %}
+									<span class="light">-</span>
+								{% else %}
+									<div class="pf-default-value {{ row.defaultUnused ? 'hidden' }}">
+										{% if row.defaultKind == 'image' %}
+											{{ forms.elementSelect({
+												name: 'fieldMapping[' ~ row.name ~ '][default]',
+												elementType: 'craft\\elements\\Asset',
+												selectionLabel: 'mapping.chooseDefaultImage'|t('product-feeds'),
+												criteria: { kind: 'image' },
+												limit: 1,
+												elements: defaultImage ? [defaultImage] : [],
+												disabled: readOnly,
+											}) }}
+										{% elseif row.defaultKind == 'select' %}
+											{{ forms.select({
+												name: 'fieldMapping[' ~ row.name ~ '][default]',
+												options: row.defaultOptions,
+												value: row.default,
+												disabled: readOnly,
+											}) }}
+										{% else %}
+											{{ forms.text({
+												name: 'fieldMapping[' ~ row.name ~ '][default]',
+												value: row.default,
+												disabled: readOnly,
+											}) }}
+										{% endif %}
+									</div>
+								{% endif %}
+							</td>
+							<td>
+								{% if row.twigErrors %}
+									<div class="error">{{ 'mapping.twigErrors'|t('product-feeds', { n: row.twigErrors }) }}</div>
+									<div class="light code">{{ row.twigErrorSample }}</div>
+								{% endif %}
+								{% if row.blanks %}
+									<div class="error">{{ 'mapping.blankItems'|t('product-feeds', { n: row.blanks }) }}</div>
+								{% endif %}
+								{% if row.invalid %}
+									<div class="warning">{{ 'mapping.nonPositivePrice'|t('product-feeds', { n: row.invalid }) }}</div>
+								{% endif %}
+								{% if row.relativeUrls %}
+									<div class="warning">{{ row.relativeUrlMessage }}</div>
+									{% if row.relativeUrlSample %}
+										<div class="light code">{{ row.relativeUrlSample }}</div>
+									{% endif %}
+								{% endif %}
+								{% if not row.twigErrors and not row.blanks and not row.invalid and not row.relativeUrls %}
+									{% if row.setOnAllItems %}
+										<div class="success">{{ 'mapping.setOnAllItems'|t('product-feeds', { n: row.setOnAllItems }) }}</div>
+									{% else %}
+										<span class="light">-</span>
+									{% endif %}
+								{% endif %}
+							</td>
+						</tr>
+					{% endfor %}
+				</tbody>
+			</table>
+
+			{% set mappingNote = spec.mappingNote() %}
+			{% if mappingNote %}
+				<p class="light">{{ mappingNote|t('product-feeds') }}</p>
+			{% endif %}
+
+			{% include 'product-feeds/_includes/excluded-products' %}
+
+			<hr>
+
+			<h2>{{ 'preview.heading'|t('product-feeds') }}</h2>
+
+			{% if canBuild %}
+				<p class="light">{{ 'preview.instructions'|t('product-feeds') }}</p>
+				<button id="preview-feed" type="button" class="btn" data-feed-id="{{ feed.id }}">{{ 'preview.button'|t('product-feeds') }}</button>
+				<div id="preview-output"></div>
+			{% endif %}
+			</div>
 		{% endif %}
 	</div>
 

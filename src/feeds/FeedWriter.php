@@ -65,7 +65,7 @@ abstract class FeedWriter
 	}
 
 	/**
-	 * A failed build writes its message to the feed's row, which the index table shows the admin.
+	 * Translated, since a failed build stores the message on the feed's row and the feeds index shows it to the admin.
 	 */
 	protected function openFailed(): Exception
 	{

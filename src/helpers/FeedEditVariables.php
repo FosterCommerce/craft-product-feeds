@@ -12,14 +12,15 @@ use fostercommerce\productfeeds\enums\AttributeKind;
 use fostercommerce\productfeeds\enums\ImageEngine;
 use fostercommerce\productfeeds\enums\ImageFit;
 use fostercommerce\productfeeds\enums\Platform;
-use fostercommerce\productfeeds\enums\Source;
 use fostercommerce\productfeeds\enums\StandardAttribute;
 use fostercommerce\productfeeds\feeds\AttributeDefinition;
 use fostercommerce\productfeeds\feeds\FeedSpec;
 use fostercommerce\productfeeds\models\Feed;
 use fostercommerce\productfeeds\models\UrlCheck;
 use fostercommerce\productfeeds\ProductFeeds;
+use fostercommerce\productfeeds\sources\CustomSource;
 use fostercommerce\productfeeds\sources\FeedSource;
+use fostercommerce\productfeeds\sources\MissingSource;
 use Throwable;
 use yii\base\Exception;
 use yii\base\InvalidConfigException;
@@ -40,6 +41,18 @@ final class FeedEditVariables
 		$spec = $feed->getSpec();
 		$source = FeedSource::forFeed($feed);
 
+		$sourceOptions = FeedSource::options();
+		if ($source instanceof MissingSource) {
+			// Name the missing source, in place of the `in` rule's generic message.
+			$feed->clearErrors('source');
+			$feed->addError('source', $source->errorMessage());
+
+			$sourceOptions[] = [
+				'value' => $feed->source,
+				'label' => FeedSource::label($feed->source),
+			];
+		}
+
 		$urlCheck = $feed->lastBuildDiagnostics->urlCheck;
 		$reachable = $urlCheck?->status === 200;
 
@@ -48,6 +61,9 @@ final class FeedEditVariables
 			'site' => $site,
 			'spec' => $spec,
 			'mappingRows' => self::mappingRows($feed, $spec, $source),
+			'sourcesWithoutDefault' => Mapping::SOURCES_WITHOUT_DEFAULT,
+			// Skip the Twig variables on a new feed, since the page doesn't render the mapping table.
+			'twigVariables' => $feed->id === null ? [] : $source->twigVariables(),
 			'unmappedRequired' => $plugin->getBuilds()->unmappedRequiredAttributes($feed, $spec, $source),
 			'sourcesWithoutUrls' => $source->sourcesWithoutUrls(),
 			'selectableSourceGroups' => $source->selectableSourceGroups(),
@@ -64,9 +80,10 @@ final class FeedEditVariables
 				: null,
 			'excludedProducts' => self::excludedProducts($feed, $source),
 			'defaultImage' => self::defaultImage($feed, $spec),
-			'filterCondition' => FilterCondition::builder($feed, $source),
+			'filterCondition' => $source instanceof CustomSource ? null : FilterCondition::builder($feed, $source),
+			'isCustomSource' => $source instanceof CustomSource,
 			'platformOptions' => self::enumOptions(Platform::cases()),
-			'sourceOptions' => self::enumOptions(Source::cases()),
+			'sourceOptions' => $sourceOptions,
 			'imageFitOptions' => self::enumOptions(ImageFit::cases()),
 			'imageEngineOptions' => self::imageEngineOptions(),
 			'craftTransformOptions' => self::craftTransformOptions(),
@@ -97,7 +114,7 @@ final class FeedEditVariables
 	}
 
 	/**
-	 * One row per attribute the admin can map.
+	 * One row per platform attribute, labeled instead of mapped where the source or plugin sets it.
 	 *
 	 * @return list<array<string, mixed>>
 	 * @throws InvalidConfigException
@@ -108,11 +125,38 @@ final class FeedEditVariables
 		$diagnostics = $feed->lastBuildDiagnostics;
 		$galleryAttribute = $spec->galleryAttribute();
 		$imageAttribute = $spec->imageAttribute();
+		$mappableAttributes = $source->mappableAttributes($spec);
+		$setBySource = Craft::t(ProductFeeds::HANDLE, 'mapping.setBySource', [
+			'source' => FeedSource::label($feed->source),
+		]);
 		$rows = [];
 
-		foreach ($source->mappableAttributes($spec) as $name => $attributeDefinition) {
+		foreach ($spec->attributes() as $name => $attributeDefinition) {
+			// Every platform attribute gets a row, so feeds on different sources list the same attributes.
+			if (! isset($mappableAttributes[$name])) {
+				$rows[] = [
+					'name' => $name,
+					'required' => $attributeDefinition->required,
+					'note' => $attributeDefinition->note,
+					'docUrl' => $spec->docUrl($name),
+					'setBy' => in_array($name, $spec->derivedAttributes(), true)
+						? Craft::t(ProductFeeds::HANDLE, 'mapping.setByPlugin')
+						: $setBySource,
+					'defaultKind' => 'none',
+					'twigErrors' => null,
+					'blanks' => null,
+					'invalid' => null,
+					'relativeUrls' => null,
+					'setOnAllItems' => null,
+				];
+
+				continue;
+			}
+
 			$mappingSource = $feed->mappingSource($name, $spec);
-			$blanks = $diagnostics->blankByAttribute[$name] ?? null;
+			// Subtract Twig failures, which also count as blanks but get their own message.
+			$blanks = ($diagnostics->blankByAttribute[$name] ?? 0) - ($diagnostics->twigErrorsByAttribute[$name] ?? 0);
+			$blanks = $blanks > 0 ? $blanks : null;
 			$invalid = $diagnostics->invalidByAttribute[$name] ?? null;
 			// An image only drops on an unparseable site base URL; a URL value drops on the value itself.
 			$relativeUrls = $diagnostics->relativeUrlByAttribute[$name] ?? null;
@@ -129,7 +173,7 @@ final class FeedEditVariables
 			// Only an attribute the feed carries, with nothing reported against it, was set on every item. The
 			// gallery is excluded: a blank one is normal.
 			$setOnAllItems = null;
-			if ($blanks === null && $invalid === null && $relativeUrls === null && $mappingSource !== Mapping::NO_INCLUDE && $name !== $galleryAttribute) {
+			if ($blanks === null && $invalid === null && $relativeUrls === null && ! isset($diagnostics->twigErrorsByAttribute[$name]) && $mappingSource !== Mapping::NO_INCLUDE && $name !== $galleryAttribute) {
 				$setOnAllItems = $feed->lastBuildItemCount;
 			}
 
@@ -138,10 +182,15 @@ final class FeedEditVariables
 				'required' => $attributeDefinition->required,
 				'note' => $attributeDefinition->note,
 				'docUrl' => $spec->docUrl($name),
+				'setBy' => null,
 				'sourceOptions' => $options[$name] ?? [],
 				'source' => $mappingSource,
 				'default' => $feed->mappingDefault($name),
 				'defaultKind' => self::defaultKind($name, $attributeDefinition, $galleryAttribute, $imageAttribute),
+				'defaultUnused' => in_array($mappingSource, Mapping::SOURCES_WITHOUT_DEFAULT, true),
+				'twig' => $feed->mappingTwig($name),
+				'twigErrors' => $diagnostics->twigErrorsByAttribute[$name] ?? null,
+				'twigErrorSample' => $diagnostics->sampleTwigErrors[$name] ?? null,
 				'defaultOptions' => self::defaultOptions($attributeDefinition),
 				'blanks' => $blanks,
 				'invalid' => $invalid,
@@ -246,13 +295,13 @@ final class FeedEditVariables
 	}
 
 	/**
-	 * @param list<ImageFit|Platform|Source> $cases
+	 * @param list<ImageFit|Platform> $cases
 	 * @return list<array{label: string, value: string}>
 	 */
 	private static function enumOptions(array $cases): array
 	{
 		return array_map(
-			static fn (ImageFit|Platform|Source $case): array => [
+			static fn (ImageFit|Platform $case): array => [
 				'label' => $case->label(),
 				'value' => $case->value,
 			],

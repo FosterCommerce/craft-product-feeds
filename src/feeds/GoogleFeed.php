@@ -4,6 +4,9 @@ declare(strict_types=1);
 
 namespace fostercommerce\productfeeds\feeds;
 
+use fostercommerce\productfeeds\enums\AttributeKind;
+use fostercommerce\productfeeds\enums\StandardAttribute;
+
 class GoogleFeed extends GoogleFormatFeed
 {
 	protected const HAS_IDENTIFIER_EXISTS = true;
@@ -20,6 +23,20 @@ class GoogleFeed extends GoogleFormatFeed
 	protected const IMAGE_SIZE_NOTE = 'feed.imageSizeGoogle';
 
 	/**
+	 * Google's value for an item that ships once restocked. Offered on Google feeds only, since the other platforms in this format don't document it.
+	 *
+	 * @see https://support.google.com/merchants/answer/12472827
+	 */
+	private const BACKORDER = 'backorder';
+
+	/**
+	 * When a preorder or backorder item ships, as ISO 8601. Required with either value.
+	 *
+	 * @see https://support.google.com/merchants/answer/6324470
+	 */
+	private const AVAILABILITY_DATE = 'availability_date';
+
+	/**
 	 * Google's help page per attribute, by answer ID. The five custom labels share one page.
 	 *
 	 * @see https://support.google.com/merchants/answer/7052112
@@ -32,6 +49,7 @@ class GoogleFeed extends GoogleFormatFeed
 		'image_link' => 12472547,
 		'additional_image_link' => 12472826,
 		'availability' => 12472827,
+		'availability_date' => 6324470,
 		'price' => 12471842,
 		'sale_price' => 12471623,
 		'sale_price_effective_date' => 12471843,
@@ -43,6 +61,10 @@ class GoogleFeed extends GoogleFormatFeed
 		'item_group_id' => 12472646,
 		'product_type' => 6324406,
 		'google_product_category' => 6324436,
+		'color' => 12471922,
+		'size' => 12471627,
+		'material' => 12472145,
+		'pattern' => 12472146,
 		'custom_label_0' => 6324473,
 		'custom_label_1' => 6324473,
 		'custom_label_2' => 6324473,
@@ -67,6 +89,25 @@ class GoogleFeed extends GoogleFormatFeed
 	 */
 	protected function defineAttributes(): array
 	{
-		return $this->standardAttributes();
+		$definitions = [];
+
+		foreach ($this->standardAttributes() as $attributeDefinition) {
+			if ($attributeDefinition->name !== StandardAttribute::Availability->value) {
+				$definitions[] = $attributeDefinition;
+				continue;
+			}
+
+			$definitions[] = new AttributeDefinition(
+				$attributeDefinition->name,
+				$attributeDefinition->attributeKind,
+				$attributeDefinition->required,
+				[...$attributeDefinition->values, self::BACKORDER],
+				$attributeDefinition->note,
+				$attributeDefinition->maxLength,
+			);
+			$definitions[] = new AttributeDefinition(self::AVAILABILITY_DATE, AttributeKind::Text, note: 'attribute.availabilityDateNote');
+		}
+
+		return $definitions;
 	}
 }

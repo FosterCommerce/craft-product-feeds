@@ -12,7 +12,7 @@ final readonly class WatchedFields
 	/**
 	 * @param list<string> $mapped handles the feed's mapping reads
 	 * @param list<string> $filter handles the feed's filter rules name
-	 * @param bool $hasRelationRule the filter carries a Related To rule, which names no field of its own,
+	 * @param bool $hasRelationRule the filter has a Related To rule, which doesn't name a field of its own,
 	 * so any relation edit has to count
 	 */
 	public function __construct(

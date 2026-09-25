@@ -1,4 +1,32 @@
-# Changelog
+# Release Notes for Product Feeds
+
+## 1.3.0 - 2026-09-25
+
+### Added
+- Added support for custom feed sources.
+- Added the “Use Twig value” mapping option.
+- Added the `backorder` availability value and the `availability_date` attribute to Google feeds.
+- Added the ability to map `item_group_id`, `sale_price`, and `sale_price_effective_date` on entry feeds.
+- Added the `color`, `size`, `material`, and `pattern` attributes to Google, Meta, Microsoft, Pinterest, and TikTok feeds.
+- Added `fostercommerce\productfeeds\sources\CustomSource`.
+- Added `fostercommerce\productfeeds\sources\SuppliedItem`.
+- Added `ProductFeeds::EVENT_REGISTER_SOURCES`.
+
+### Changed
+- Product Feeds now requires Craft CMS 5.9 or later.
+- The “Mapping” tab now lists every attribute the platform defines.
+- The “Default value” box now appears only when the row's selected option uses it.
+- The “Mapping” tab now lists fields only for the source, platform, and types the feed was last saved with.
+- Changing a feed's source now resets its mapping to the new source's defaults.
+- “Build now” and “Rotate feed URL” are now buttons beside “Save”.
+- The “Excluded products” panel is now “Excluded items”.
+- Items with the same `id` as an earlier item are now excluded from the feed.
+- URL and image values must now use `http` or `https`.
+- “Test image” now uses the feed's saved mapping for users who can't edit feeds.
+- `productFeeds:edit` now lets a user write Twig values, which have full template access unless the site turns on `enableTwigSandbox`.
+
+### Deprecated
+- Deprecated `Feed::getSource()`. Use `FeedSource::forFeed()` instead.
 
 ## 1.2.0 - 2026-07-23
 

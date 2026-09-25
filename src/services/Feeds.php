@@ -160,8 +160,8 @@ class Feeds extends Component
 		$record->lastBuildFinishedAt = Db::prepareDateForDb(new DateTime());
 		$record->lastBuildError = $error;
 
-		// A failed build publishes nothing, so these still describe the artifact being served, and
-		// `FeedController` serves no feed whose row carries no size.
+		// Update the counts and sizes only after a successful build, since a failed build doesn't publish an
+		// artifact, and `FeedController` doesn't serve a feed whose row has no size.
 		if ($result instanceof BuildResult) {
 			$record->lastBuildItemCount = $result->itemCount;
 			$record->lastBuildSkippedCount = $result->buildDiagnostics->skippedCount();
@@ -216,7 +216,7 @@ class Feeds extends Component
 		$duplicate->enabled = false;
 		$duplicate->sortOrder = null;
 
-		// `saveFeed()` writes no build column, so the new row comes up at its defaults and the clone has
+		// `saveFeed()` doesn't write the build columns, so the new row comes up at its defaults and the clone has
 		// to match. Diagnostics included: `clone` is shallow, so both feeds would share one.
 		$duplicate->lastBuildStatus = BuildStatus::Pending->value;
 		$duplicate->lastBuildStartedAt = null;

@@ -67,7 +67,7 @@ class Feed extends Model implements Statusable
 	public array $sourceIds = [];
 
 	/**
-	 * @var array<string, array{source: string, default: string}>
+	 * @var array<string, array{source: string, default: string, twig?: string}>
 	 */
 	public array $fieldMapping = [];
 
@@ -131,9 +131,14 @@ class Feed extends Model implements Statusable
 		return Platform::from($this->platform);
 	}
 
-	public function getSource(): Source
+	/**
+	 * @deprecated in 1.3.0. Use [[FeedSource::forFeed()]] instead.
+	 */
+	public function getSource(): ?Source
 	{
-		return Source::from($this->source);
+		Craft::$app->getDeprecator()->log(__METHOD__, '`Feed::getSource()` has been deprecated. Use `FeedSource::forFeed()` instead.');
+
+		return Source::tryFrom($this->source);
 	}
 
 	public function getLastBuildStatus(): BuildStatus
@@ -258,6 +263,11 @@ class Feed extends Model implements Statusable
 		return trim($this->fieldMapping[$attribute]['default'] ?? '');
 	}
 
+	public function mappingTwig(string $attribute): string
+	{
+		return trim($this->fieldMapping[$attribute]['twig'] ?? '');
+	}
+
 	/**
 	 * Checks each default against its attribute: an enumerated attribute against the platform's
 	 * vocabulary, the rest for shape.
@@ -278,6 +288,11 @@ class Feed extends Model implements Statusable
 				continue;
 			}
 
+			// A hidden default still posts, and must not block the save.
+			if (in_array($this->mappingSource($name, $spec), Mapping::SOURCES_WITHOUT_DEFAULT, true)) {
+				continue;
+			}
+
 			$error = $this->defaultValueError($attributeDefinition, $default);
 			if ($error !== null) {
 				$this->addError($modelAttribute, $error);
@@ -287,16 +302,15 @@ class Feed extends Model implements Statusable
 
 	/**
 	 * Checks each mapping's source is one the dropdown would have offered for that attribute's kind. Only
-	 * the browser enforced it, so without this `image_link` could point at a text field and the build
-	 * would fetch whatever it holds. A handle on no layout is left alone: it resolves to a blank.
+	 * the browser enforced the dropdown, so without this check `image_link` could point at a text field and
+	 * the build would fetch the field's value. A handle on no layout is left alone: it resolves to a blank.
 	 *
 	 * @throws InvalidConfigException
 	 */
 	public function validateFieldMappingSources(string $modelAttribute): void
 	{
-		// As in `validateFieldMapping()`: `FeedSource::forFeed()` resolves the source through an enum that
-		// throws on a value the `in` rules have already rejected.
-		if ($this->siteId === null || $this->hasErrors('platform') || $this->hasErrors('source')) {
+		// Resolving the spec throws on a platform the `in` rule already rejected.
+		if ($this->siteId === null || $this->hasErrors('platform')) {
 			return;
 		}
 
@@ -322,12 +336,12 @@ class Feed extends Model implements Statusable
 
 	/**
 	 * @return array<int, mixed>
+	 * @throws InvalidConfigException
 	 */
 	protected function defineRules(): array
 	{
 		return [
-			// Ahead of the mapping validators: both resolve the platform and the source through the enums,
-			// which throw on a value these rules are here to reject.
+			// Ahead of the mapping validators, which throw on an unknown platform.
 			[
 				['platform'],
 				'in',
@@ -336,7 +350,7 @@ class Feed extends Model implements Statusable
 			[
 				['source'],
 				'in',
-				'range' => Source::values(),
+				'range' => FeedSource::values(),
 			],
 			[['fieldMapping'], 'validateFieldMapping'],
 			[['fieldMapping'], 'validateFieldMappingSources'],

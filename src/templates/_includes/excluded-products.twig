@@ -12,7 +12,11 @@
 		{% for excluded in excludedProducts %}
 			<li class="pf-excluded-item">
 				{{ elementChip(excluded.element) }}
-				<span class="pf-excluded-reason">{{ 'mapping.excludedReason'|t('product-feeds', { attribute: excluded.reason }) }}</span>
+				<span class="pf-excluded-reason">
+					{{ excluded.reason == constant('fostercommerce\\productfeeds\\models\\BuildDiagnostics::DUPLICATE_ID')
+						? 'mapping.excludedDuplicateId'|t('product-feeds')
+						: 'mapping.excludedReason'|t('product-feeds', { attribute: excluded.reason }) }}
+				</span>
 			</li>
 		{% endfor %}
 	</ul>

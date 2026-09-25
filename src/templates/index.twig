@@ -39,14 +39,16 @@
 
 {% block contentNotice %}
 	{% if not fsConfigured %}
-		<p class="warning has-icon">
-			<span class="icon" aria-hidden="true"></span>
-			<span class="visually-hidden">{{ 'Warning:'|t('app') }}</span>
-			<span>
+		{# Craft's `Cp::readOnlyNoticeHtml()` markup, which the content-notice bar styles. #}
+		<div class="content-notice">
+			<div class="content-notice-icon" aria-hidden="true">
+				<div class="cp-icon">{{ iconSvg('triangle-exclamation') }}</div>
+			</div>
+			<p>
 				{{ 'index.noFilesystem'|t('product-feeds') }}
 				<a href="{{ url('settings/plugins/product-feeds') }}">{{ 'index.openSettings'|t('product-feeds') }}</a>
-			</span>
-		</p>
+			</p>
+		</div>
 	{% endif %}
 {% endblock %}
 

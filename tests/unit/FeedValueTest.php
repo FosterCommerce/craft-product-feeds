@@ -74,8 +74,8 @@ class FeedValueTest extends TestCase
 	/**
 	 * `is_numeric()` accepts a leading `+` and exponent notation, which MoneyPHP's decimal parser
 	 * rejects by throwing. One unparseable price has to become a blank that skips the item, not an
-	 * exception that fails the whole build. A large float stringifies to exponent form, so this is the
-	 * value a real catalog produces.
+	 * exception that fails the whole build. A large float stringifies to exponent form, so a real catalog
+	 * produces these values.
 	 */
 	public function testAmountsOutsideTheDecimalGrammarYieldNothing(): void
 	{
@@ -202,8 +202,8 @@ class FeedValueTest extends TestCase
 	}
 
 	/**
-	 * With no resolvable origin the value is left alone, which drops it at the absolute-only filter in
-	 * `ItemBuilder` and is the one path that still reaches the CP's relative-URL warning.
+	 * With no resolvable origin the value stays relative. The absolute-only filter in `ItemBuilder` then
+	 * discards the value, the only case the CP's relative-URL warning still reports.
 	 */
 	public function testAnUnresolvableBaseUrlLeavesTheValueAlone(): void
 	{

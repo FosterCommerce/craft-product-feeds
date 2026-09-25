@@ -4,14 +4,16 @@ declare(strict_types=1);
 
 namespace fostercommerce\productfeeds\feeds;
 
+use Craft;
 use craft\base\ElementInterface;
-use craft\helpers\UrlHelper;
 use fostercommerce\productfeeds\enums\AttributeKind;
 use fostercommerce\productfeeds\helpers\FeedValue;
 use fostercommerce\productfeeds\helpers\Mapping;
 use fostercommerce\productfeeds\models\BuildDiagnostics;
 use fostercommerce\productfeeds\models\Feed;
+use fostercommerce\productfeeds\ProductFeeds;
 use fostercommerce\productfeeds\sources\FeedSource;
+use fostercommerce\productfeeds\sources\SuppliedItem;
 use Money\Currency;
 use Money\Money;
 use Throwable;
@@ -25,7 +27,7 @@ final readonly class ItemBuilder
 	/**
 	 * Every attribute's mapping, parsed once per build rather than once per item.
 	 *
-	 * @var array<string, array{kind: string, value: string, default: string}>
+	 * @var array<string, array{kind: string, value: string, default: string, twig: string}>
 	 */
 	private array $mappings;
 
@@ -44,6 +46,7 @@ final readonly class ItemBuilder
 				'kind' => $parsed['kind'],
 				'value' => $parsed['value'],
 				'default' => $feed->mappingDefault($name),
+				'twig' => $feed->mappingTwig($name),
 			];
 		}
 
@@ -57,8 +60,9 @@ final readonly class ItemBuilder
 	 * @throws InvalidConfigException
 	 * @throws Throwable
 	 */
-	public function forElement(ElementInterface $element): array
+	public function forElement(ElementInterface $element, SuppliedItem $suppliedItem): array
 	{
+		$suppliedValues = $suppliedItem->values;
 		$computedAttributes = $this->feedSource->computedAttributes();
 		$derivedAttributes = $this->feedSpec->derivedAttributes();
 		$imageAttribute = $this->feedSpec->imageAttribute();
@@ -75,10 +79,12 @@ final readonly class ItemBuilder
 			}
 
 			$isComputed = in_array($attributeName, $computedAttributes, true);
-			$values = $this->valuesFor($element, $attributeDefinition, $isComputed);
+			$values = $this->valuesFor($element, $attributeDefinition, $isComputed, $suppliedItem);
 
 			if ($attributeName === $galleryAttribute) {
-				$gallery = $this->galleryImages($attributeName, $values, $imageValues);
+				$gallery = array_key_exists($attributeName, $suppliedValues)
+					? array_slice($values, 0, FeedSpec::MAX_GALLERY_IMAGES)
+					: $this->galleryImages($attributeName, $values, $imageValues);
 				if ($gallery !== []) {
 					$item[$attributeName] = $gallery;
 				}
@@ -125,12 +131,12 @@ final readonly class ItemBuilder
 	}
 
 	/**
-	 * Records that an element was excluded from the feed.
+	 * Records that an item was excluded, and why.
 	 */
-	public function recordSkip(ElementInterface $element, string $attribute): void
+	public function recordSkip(ElementInterface $element, string $reason): void
 	{
-		$this->buildDiagnostics->countSkipped($attribute);
-		$this->buildDiagnostics->recordSkippedSample((int) $element->id, $attribute);
+		$this->buildDiagnostics->countSkipped($reason);
+		$this->buildDiagnostics->recordSkippedSample((int) $element->id, $reason);
 	}
 
 	/**
@@ -152,13 +158,12 @@ final readonly class ItemBuilder
 	}
 
 	/**
-	 * What an attribute's mapping resolves to, falling back to its default. Public so the image test can
-	 * resolve a URL exactly as a build would.
+	 * What an attribute's mapping resolves to, falling back to its default.
 	 *
 	 * @return list<string>
 	 * @throws InvalidConfigException
 	 */
-	public function mappedValues(ElementInterface $element, AttributeDefinition $attributeDefinition): array
+	private function mappedValues(ElementInterface $element, AttributeDefinition $attributeDefinition): array
 	{
 		$mapping = $this->mappings[$attributeDefinition->name];
 		$default = $mapping['default'];
@@ -177,32 +182,11 @@ final readonly class ItemBuilder
 				: [$default];
 		}
 
-		$kind = $attributeDefinition->attributeKind;
-		if ($kind === AttributeKind::Url || $kind === AttributeKind::Image) {
-			$absolute = [];
-			$firstDropped = null;
-
-			foreach ($values as $value) {
-				if (UrlHelper::isAbsoluteUrl($value)) {
-					$absolute[] = $value;
-				} else {
-					$firstDropped ??= $value;
-				}
-			}
-
-			// Separate from countBlank: a dropped relative URL leaves the attribute empty, same as unmapped.
-			if ($firstDropped !== null) {
-				$this->buildDiagnostics->countRelativeUrl($attributeDefinition->name, $firstDropped);
-			}
-
-			return $absolute;
-		}
-
-		return $values;
+		return $this->absoluteUrlsOnly($attributeDefinition, $values);
 	}
 
 	/**
-	 * An attribute's values for one element, formatted the way the platform wants them.
+	 * An attribute's values for one item, formatted the way the platform wants them.
 	 *
 	 * @return list<string>
 	 * @throws InvalidConfigException
@@ -212,16 +196,95 @@ final readonly class ItemBuilder
 		ElementInterface $element,
 		AttributeDefinition $attributeDefinition,
 		bool $isComputed,
+		SuppliedItem $suppliedItem,
 	): array {
 		$attributeName = $attributeDefinition->name;
 
-		$values = $isComputed
-			? $this->computedValues($this->feedSource->compute($element, $attributeName))
-			: $this->mappedValues($element, $attributeDefinition);
+		$values = match (true) {
+			array_key_exists($attributeName, $suppliedItem->values) => $this->absoluteUrlsOnly(
+				$attributeDefinition,
+				$this->feedSource->normalizeValue($suppliedItem->values[$attributeName], $attributeDefinition),
+			),
+			$isComputed => $this->computedValues($this->feedSource->compute($element, $attributeName)),
+			$this->mappings[$attributeName]['kind'] === Mapping::TWIG => $this->twigValues($element, $attributeDefinition, $suppliedItem),
+			default => $this->mappedValues($element, $attributeDefinition),
+		};
 
 		return $attributeDefinition->attributeKind === AttributeKind::Money
 			? $this->formattedMoney($values, $attributeName)
 			: $values;
+	}
+
+	/**
+	 * Render the attribute's Twig value, left blank on a render error instead of failing the build.
+	 *
+	 * @return list<string>
+	 * @throws InvalidConfigException
+	 */
+	private function twigValues(ElementInterface $element, AttributeDefinition $attributeDefinition, SuppliedItem $suppliedItem): array
+	{
+		try {
+			$rendered = Craft::$app->getView()->renderSandboxedObjectTemplate(
+				$this->mappings[$attributeDefinition->name]['twig'],
+				$element,
+				[
+					...$suppliedItem->variables,
+					'item' => $suppliedItem->values,
+				],
+			);
+		} catch (Throwable $throwable) {
+			$this->recordTwigError($attributeDefinition->name, $throwable);
+
+			return [];
+		}
+
+		return $this->absoluteUrlsOnly($attributeDefinition, $this->feedSource->normalizeValue($rendered, $attributeDefinition));
+	}
+
+	private function recordTwigError(string $attribute, Throwable $throwable): void
+	{
+		// Log the first error per attribute, not one per item.
+		if (! isset($this->buildDiagnostics->twigErrorsByAttribute[$attribute])) {
+			Craft::error(sprintf(
+				'Product feed “%s” Twig value for %s failed: %s',
+				$this->feed->handle,
+				$attribute,
+				$throwable->getMessage()
+			), ProductFeeds::HANDLE);
+		}
+
+		$this->buildDiagnostics->countTwigError($attribute, $throwable->getMessage());
+	}
+
+	/**
+	 * @param list<string> $values
+	 * @return list<string>
+	 */
+	private function absoluteUrlsOnly(AttributeDefinition $attributeDefinition, array $values): array
+	{
+		$kind = $attributeDefinition->attributeKind;
+		if ($kind !== AttributeKind::Url && $kind !== AttributeKind::Image) {
+			return $values;
+		}
+
+		$absolute = [];
+		$firstDropped = null;
+
+		foreach ($values as $value) {
+			// Only a web URL can be a landing page or an image, and another scheme would be a live link in the preview.
+			if (in_array(parse_url($value, PHP_URL_SCHEME), ['http', 'https'], true)) {
+				$absolute[] = $value;
+			} else {
+				$firstDropped ??= $value;
+			}
+		}
+
+		// Count discarded relative URLs apart from blanks, since the Mapping tab reports each on its own line.
+		if ($firstDropped !== null) {
+			$this->buildDiagnostics->countRelativeUrl($attributeDefinition->name, $firstDropped);
+		}
+
+		return $absolute;
 	}
 
 	/**

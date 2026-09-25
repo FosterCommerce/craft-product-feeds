@@ -233,7 +233,7 @@ class FeedsTest extends IntegrationTestCase
 
 	/**
 	 * The copy has never been built, and `saveFeed()` doesn't write the build columns, so the row comes up
-	 * at its defaults. `clone` is shallow, so the model has to be reset to match: it once carried the source
+	 * at its defaults. `clone` is shallow, so the model has to be reset to match: it once had the source
 	 * feed's numbers and shared its `BuildDiagnostics` by reference.
 	 */
 	public function testDuplicateCarriesNoneOfTheSourceFeedsBuildHistory(): void
@@ -267,7 +267,7 @@ class FeedsTest extends IntegrationTestCase
 
 		$reloaded = $this->feeds()->getFeedById((int) $duplicate->id);
 		$this->assertNotNull($reloaded);
-		$this->assertNull($reloaded->lastBuildItemCount, 'The saved row carries no build history either.');
+		$this->assertNull($reloaded->lastBuildItemCount, 'The saved row has no build history either.');
 	}
 
 	public function testAHandleCannotBeTakenTwice(): void

@@ -115,8 +115,8 @@ class RssFeedWriter extends FeedWriter
 			return $cleaned;
 		}
 
-		// preg_replace returns null on malformed UTF-8, which a truncated 4-byte character in the
-		// database will produce.
+		// Scrub malformed UTF-8, such as a truncated 4-byte character from the database, since preg_replace
+		// returns null on it.
 		$scrubbed = mb_convert_encoding($value, 'UTF-8', 'UTF-8');
 
 		return (string) preg_replace(self::INVALID_XML_CHARACTERS, '', $scrubbed);

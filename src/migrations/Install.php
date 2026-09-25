@@ -26,7 +26,7 @@ class Install extends Migration
 			'name' => $this->string()->notNull(),
 			'handle' => $this->string()->notNull(),
 			'platform' => $this->string(16)->notNull(),
-			'source' => $this->string(16)->notNull(),
+			'source' => $this->string()->notNull(),
 			'siteId' => $this->integer()->notNull(),
 			'sourceIds' => $this->text(),
 			// A mapping row per attribute, each with its own default value, can outgrow TEXT's 64KB.

@@ -7,6 +7,10 @@
 					<span class="pf-preview-status pf-preview-excluded">
 						{{ 'preview.wouldSkip'|t('product-feeds', { platform: platformLabel, attribute: row.missing }) }}
 					</span>
+				{% elseif row.duplicate %}
+					<span class="pf-preview-status pf-preview-excluded">
+						{{ 'preview.wouldSkipDuplicate'|t('product-feeds', { platform: platformLabel }) }}
+					</span>
 				{% else %}
 					<span class="pf-preview-status pf-preview-ok">
 						{{ 'preview.allRequired'|t('product-feeds') }}

@@ -172,7 +172,7 @@ abstract class IntegrationTestCase extends TestCase
 		}
 
 		// Every caller asserts over the published items, and an empty feed would pass all of those vacuously.
-		$this->assertGreaterThan(0, $result->itemCount, 'The catalog produced no items to assert against.');
+		$this->assertGreaterThan(0, $result->itemCount, "The catalog didn't produce an item to assert against.");
 
 		return $result;
 	}
@@ -185,7 +185,7 @@ abstract class IntegrationTestCase extends TestCase
 		$fs = $this->feeds()->getFs();
 		$path = $feed->getPath();
 
-		$this->assertTrue($fs->fileExists($path), 'The build published no artifact.');
+		$this->assertTrue($fs->fileExists($path), "The build didn't publish an artifact.");
 
 		$stream = $fs->getFileStream($path);
 		stream_filter_append($stream, 'zlib.inflate', STREAM_FILTER_READ, [

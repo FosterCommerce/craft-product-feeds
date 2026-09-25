@@ -133,8 +133,8 @@ class BuildQueue extends Component
 	public function requeueBuild(int $feedId, int $requeues): bool
 	{
 		if ($requeues >= self::MAX_REQUEUES) {
-			// Nothing is queued behind the flag now, so leaving it set would block the interval rebuild that
-			// this stand-down is falling back on.
+			// Clear the flag, since no build is queued behind it now, and a set flag would block the interval
+			// rebuild this stand-down falls back on.
 			$this->clearPending($feedId);
 
 			return false;

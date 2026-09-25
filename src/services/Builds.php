@@ -28,7 +28,10 @@ use fostercommerce\productfeeds\models\Feed;
 use fostercommerce\productfeeds\models\ImageTestResult;
 use fostercommerce\productfeeds\models\UrlCheck;
 use fostercommerce\productfeeds\ProductFeeds;
+use fostercommerce\productfeeds\sources\CustomSource;
 use fostercommerce\productfeeds\sources\FeedSource;
+use fostercommerce\productfeeds\sources\MissingSource;
+use fostercommerce\productfeeds\sources\SuppliedItem;
 use Throwable;
 use yii\base\Exception;
 use yii\base\InvalidConfigException;
@@ -59,7 +62,7 @@ class Builds extends Component
 			return null;
 		}
 
-		// This build reads the catalog as it stands now, so an edit landing from here on needs its own build.
+		// Clear the pending flag, since this build reads the current catalog and a later edit needs its own build.
 		$buildQueue->clearPending($feedId);
 
 		try {
@@ -120,7 +123,7 @@ class Builds extends Component
 	 * The first items a build would publish, with the reason it would skip each one it cannot. Blank
 	 * attributes are dropped from an item, so without the reason a skipped item previews as complete.
 	 *
-	 * @return list<array{elementId: int, item: array<string, string|list<string>>, missing: ?string}>
+	 * @return list<array{elementId: int, item: array<string, string|list<string>>, missing: ?string, duplicate: bool}>
 	 * @throws InvalidConfigException
 	 * @throws Throwable
 	 */
@@ -136,19 +139,29 @@ class Builds extends Component
 		// The preview shows the items, not the counts, so these are collected and dropped.
 		$itemBuilder = new ItemBuilder($feed, $spec, $source, new BuildDiagnostics());
 		$rows = [];
+		$previewedIds = [];
 
 		foreach ($elements as $element) {
-			$item = $itemBuilder->forElement($element);
-			$missing = $itemBuilder->missingRequired($item);
+			foreach ($source->items($element) as $suppliedItem) {
+				$item = $itemBuilder->forElement($element, $suppliedItem);
+				$missing = $itemBuilder->missingRequired($item);
+				$itemId = $item['id'] ?? null;
+				$isDuplicate = $missing === null && is_string($itemId) && isset($previewedIds[$itemId]);
+				// Only a published item claims its id, as in the build.
+				if ($missing === null && is_string($itemId)) {
+					$previewedIds[$itemId] = true;
+				}
 
-			$rows[] = [
-				'elementId' => (int) $element->id,
-				'item' => $itemBuilder->renameForDocument($item),
-				'missing' => $missing === null ? null : $spec->documentName($missing),
-			];
+				$rows[] = [
+					'elementId' => (int) $element->id,
+					'item' => $itemBuilder->renameForDocument($item),
+					'missing' => $missing === null ? null : $spec->documentName($missing),
+					'duplicate' => $isDuplicate,
+				];
+			}
 		}
 
-		return $rows;
+		return array_slice($rows, 0, $limit);
 	}
 
 	/**
@@ -175,6 +188,10 @@ class Builds extends Component
 			if ($mappingSource === Mapping::USE_DEFAULT && $feed->mappingDefault($name) === '') {
 				$unmapped[] = $name;
 			}
+
+			if ($mappingSource === Mapping::TWIG && $feed->mappingTwig($name) === '') {
+				$unmapped[] = $name;
+			}
 		}
 
 		return $unmapped;
@@ -184,6 +201,7 @@ class Builds extends Component
 	 * Fetches the image the feed's first item would publish, resolved exactly as a build resolves it.
 	 *
 	 * @throws InvalidConfigException
+	 * @throws Throwable
 	 */
 	public function testImage(Feed $feed): ImageTestResult
 	{
@@ -199,8 +217,10 @@ class Builds extends Component
 			return ImageTestResult::failed($minimumSize, Craft::t(ProductFeeds::HANDLE, 'imageTest.noProduct'));
 		}
 
+		$source->prepareBatch([$element]);
 		$itemBuilder = new ItemBuilder($feed, $spec, $source, new BuildDiagnostics());
-		$url = $itemBuilder->mappedValues($element, $attributeDefinition)[0] ?? null;
+		$imageValue = $itemBuilder->forElement($element, $source->items($element)[0] ?? new SuppliedItem())[$attributeDefinition->name] ?? null;
+		$url = is_array($imageValue) ? ($imageValue[0] ?? null) : $imageValue;
 		if ($url === null || $url === '') {
 			return ImageTestResult::failed($minimumSize, Craft::t(ProductFeeds::HANDLE, 'imageTest.noUrl'));
 		}
@@ -235,12 +255,16 @@ class Builds extends Component
 	 */
 	private function assertBuildable(Feed $feed, FeedSpec $spec, FeedSource $source): void
 	{
+		if ($source instanceof MissingSource) {
+			throw new FeedBuildException($source->errorMessage());
+		}
+
 		if (! $feed->getStore() instanceof Store) {
 			throw new FeedBuildException(Craft::t(ProductFeeds::HANDLE, 'error.noStoreForSite'));
 		}
 
-		// An engine whose plugin has gone resolves every image to null, which would exclude every item
-		// and report it as a blank `image_link`.
+		// Fail the build when the engine's plugin is uninstalled, since every image would resolve to null and
+		// every item would be excluded as a blank `image_link`.
 		$imageEngine = ImageEngine::from($feed->imageEngine);
 		if (! $imageEngine->isAvailable()) {
 			throw new FeedBuildException(Craft::t(ProductFeeds::HANDLE, 'error.imageEngineUnavailable', [
@@ -255,7 +279,7 @@ class Builds extends Component
 			]));
 		}
 
-		if ($source->effectiveSourceIds() === []) {
+		if ($source->effectiveSourceIds() === [] && ! $source instanceof CustomSource) {
 			throw new FeedBuildException(Craft::t(ProductFeeds::HANDLE, 'error.noSourcesWithUrls'));
 		}
 
@@ -287,6 +311,8 @@ class Builds extends Component
 		$total = (int) $query->count();
 		$batchSize = ProductFeeds::plugin()->getSettings()->batchSize;
 		$itemCount = 0;
+		$elementCount = 0;
+		$publishedIds = [];
 
 		$writer->open();
 
@@ -296,24 +322,39 @@ class Builds extends Component
 				$source->prepareBatch($batch);
 
 				foreach ($batch as $element) {
-					$item = $itemBuilder->forElement($element);
-					$missing = $itemBuilder->missingRequired($item);
+					foreach ($source->items($element) as $suppliedItem) {
+						$item = $itemBuilder->forElement($element, $suppliedItem);
+						$missing = $itemBuilder->missingRequired($item);
 
-					if ($missing !== null) {
-						$itemBuilder->recordSkip($element, $missing);
-						$report->write($source->reportRow($element, $missing));
+						if ($missing !== null) {
+							$itemBuilder->recordSkip($element, $missing);
+							$report->write($this->reportRow($source, $element, $item, $missing));
 
-						continue;
+							continue;
+						}
+
+						$itemId = $item['id'] ?? null;
+						if (is_string($itemId)) {
+							if (isset($publishedIds[$itemId])) {
+								$itemBuilder->recordSkip($element, BuildDiagnostics::DUPLICATE_ID);
+								$report->write($this->reportRow($source, $element, $item, Craft::t(ProductFeeds::HANDLE, 'mapping.excludedDuplicateId')));
+
+								continue;
+							}
+
+							$publishedIds[$itemId] = true;
+						}
+
+						$writer->writeItem($itemBuilder->renameForDocument($item));
+						$itemCount++;
 					}
-
-					$writer->writeItem($itemBuilder->renameForDocument($item));
-					$itemCount++;
 				}
 
 				$writer->flush();
+				$elementCount += count($batch);
 
 				if ($onProgress !== null) {
-					$onProgress($itemCount, $total);
+					$onProgress($elementCount, $total);
 				}
 			}
 
@@ -330,8 +371,25 @@ class Builds extends Component
 	}
 
 	/**
-	 * Advisory only: a queue worker frequently cannot resolve its own site's public hostname, so this
-	 * never fails a build.
+	 * Report an item by its own id, since a custom source can return several items per element.
+	 *
+	 * @param array<string, string|list<string>> $item
+	 * @return array{id: string, title: string, cpUrl: string, issue: string}
+	 */
+	private function reportRow(FeedSource $source, ElementInterface $element, array $item, string $issue): array
+	{
+		$row = $source->reportRow($element, $issue);
+
+		if (is_string($item['id'] ?? null)) {
+			$row['id'] = $item['id'];
+		}
+
+		return $row;
+	}
+
+	/**
+	 * Advisory, and never fails a build: a queue worker frequently cannot resolve its own site's public
+	 * hostname.
 	 */
 	private function checkFeedUrl(string $url): UrlCheck
 	{

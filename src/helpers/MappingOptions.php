@@ -48,8 +48,8 @@ final class MappingOptions
 				],
 		];
 
-		// The gallery fills itself from the main image's leftovers or from a field of its own, so it takes
-		// neither a default nor an element value.
+		// Offer the gallery neither a default nor an element value, since it uses the main image's extra
+		// assets or a field of its own.
 		if ($attributeDefinition->name === $spec->galleryAttribute()) {
 			$options[] = [
 				'label' => Craft::t(ProductFeeds::HANDLE, 'mapping.imageOverflow', [
@@ -64,6 +64,10 @@ final class MappingOptions
 		$options[] = [
 			'label' => Craft::t(ProductFeeds::HANDLE, 'mapping.useDefaultValue'),
 			'value' => Mapping::USE_DEFAULT,
+		];
+		$options[] = [
+			'label' => Craft::t(ProductFeeds::HANDLE, 'mapping.useTwigValue'),
+			'value' => Mapping::TWIG,
 		];
 
 		// No native element value is an image, so image attributes offer field sources only.

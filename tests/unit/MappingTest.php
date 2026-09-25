@@ -49,6 +49,14 @@ class MappingTest extends TestCase
 		$this->assertSame(Mapping::IMAGE_OVERFLOW, Mapping::parse(Mapping::IMAGE_OVERFLOW)['kind']);
 	}
 
+	public function testParsesTwig(): void
+	{
+		$this->assertSame([
+			'kind' => Mapping::TWIG,
+			'value' => '',
+		], Mapping::parse(Mapping::TWIG));
+	}
+
 	public function testBuildRoundTrips(): void
 	{
 		$source = Mapping::build(Mapping::PRODUCT_FIELD, 'productBrand');
@@ -59,16 +67,18 @@ class MappingTest extends TestCase
 		], Mapping::parse($source));
 	}
 
-	public function testRowsFillInBothKeys(): void
+	public function testRowsFillInEveryKey(): void
 	{
 		$this->assertSame([
 			'title' => [
 				'source' => 'element:product.title',
 				'default' => '',
+				'twig' => '',
 			],
 			'condition' => [
 				'source' => Mapping::USE_DEFAULT,
 				'default' => 'new',
+				'twig' => '',
 			],
 		], Mapping::normalizeRows([
 			'title' => [
