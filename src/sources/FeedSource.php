@@ -59,6 +59,7 @@ abstract class FeedSource
 		if ($builtInSource instanceof Source) {
 			return match ($builtInSource) {
 				Source::Variants => new VariantSource($feed),
+				Source::Products => new ProductSource($feed),
 				Source::Entries => new EntrySource($feed),
 			};
 		}
@@ -195,6 +196,25 @@ abstract class FeedSource
 	 * @return array<string, array<string, string>> group translation key => (path => label)
 	 */
 	abstract public function elementPaths(): array;
+
+	/**
+	 * The element paths the mapping dropdown offers for one attribute.
+	 *
+	 * @return array<string, array<string, string>> group translation key => (path => label)
+	 */
+	public function elementPathsFor(string $attribute): array
+	{
+		return $this->elementPaths();
+	}
+
+	/**
+	 * Whether an element path is a value this source calculates in `resolve()`. A blank calculation is not
+	 * counted on the Mapping tab, the same as a blank computed attribute.
+	 */
+	public function isCalculatedPath(string $path): bool
+	{
+		return false;
+	}
 
 	/**
 	 * The source keys the admin may choose. Only the ones whose items have a public URL on this feed's

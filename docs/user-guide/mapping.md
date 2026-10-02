@@ -4,7 +4,7 @@ How to connect Craft data to a platform's attributes.
 
 ## Choosing what the feed reads
 
-On the **Settings** tab, a variant feed lists your **Product types** and an entry feed lists your **Entry types**, grouped by section. Leave every box unchecked to include every type with a public URL on this site.
+On the **Settings** tab, a variant or product feed lists your **Product types** and an entry feed lists your **Entry types**, grouped by section. Leave every box unchecked to include every type with a public URL on this site.
 
 An entry type used by two sections is listed under each. Selecting "General Page" under **Pages** includes only the Pages entries of that type.
 
@@ -26,10 +26,11 @@ Every attribute the platform defines gets a row on the **Mapping** tab. A row th
 - **Don’t include**: the attribute is left out. A required attribute has no **Don’t include**; its row starts blank until you choose where its value comes from.
 - **Use default value**: the same value for every item, set in the **Default value** column. Use it for `condition`, and for `brand` on a single-brand store. On `image_link` it is an asset picker rather than a text box.
 - **Use Twig value**: a Twig template, written in the **Default value** column and rendered for each item. See [Twig values](#twig-values).
-- **Variant properties** / **Product properties**, or **Entry properties** on an entry feed: a native value such as the SKU, the product title, or the product URL.
+- **Variant properties** / **Product properties**, or **Entry properties** on an entry feed: a native value such as the SKU, the product title, or the product URL. On a product feed, **Product properties** also offers the default variant's SKU.
+- **Calculated from variants**, on a product feed's `price`, `sale_price`, `availability`, and `inventory_quantity` rows: a value worked out from the product's variants. See [product feeds](#product-feeds).
 - **Variant fields** and **Product fields**, or **Entry fields**: a Craft field. On a variant feed the variant's own fields and its product's fields are listed separately.
 
-On a custom source's feed, the dropdown lists **Properties** (title, URL, slug, and ID) and **Fields**.
+On a custom source's feed, the dropdown lists **Properties** (title, URL, slug, and ID) and **Fields** by default. The source can [change these](../dev-guide/custom-sources.md#mapping-choices).
 
 The **Default value** box appears with **Use default value**, and with a property or field. With a property or field, the default applies to an item whose value is blank.
 
@@ -59,9 +60,44 @@ A **Klaviyo feed** has no `availability`: it sends stock as the number `inventor
 
 On a **variant feed** the plugin derives `id`, `item_group_id`, `price`, `sale_price`, `sale_price_effective_date`, `availability`, and `inventory_quantity` from Commerce, and `identifier_exists` as well on Google and Microsoft. That leaves `title`, `description`, `link`, and `image_link` to map, plus `brand` and `condition` on a Meta or TikTok feed.
 
+On a **product feed** the source derives only `id`, the product ID. `price`, `sale_price`, `availability`, and `inventory_quantity` are mapped, and a new feed maps each one to a calculation. See [product feeds](#product-feeds).
+
 On an **entry feed** there is no Commerce variant behind the item, so `price` and `availability` are yours to map, and are required. You can also map `item_group_id`, `sale_price`, and `sale_price_effective_date`; a Twig value can build a date range from Date fields.
 
-A new variant or entry feed is saved partly mapped: `title` and `link` use the product's or entry's title and URL, and `condition` defaults to `new`. A new entry feed also sets `availability` to `in_stock`. A feed on a custom source starts unmapped.
+A new variant, product, or entry feed is saved partly mapped: `title` and `link` use the product's or entry's title and URL, and `condition` defaults to `new`. A new entry feed also sets `availability` to `in_stock`. A feed on a custom source starts unmapped.
+
+## Product feeds
+
+A product feed publishes one item per product, and its `id` is the product ID. Price and stock belong to the product's variants, so each of those rows offers a calculation under **Calculated from variants**:
+
+| Attribute | Options | New feed default |
+|---|---|---|
+| `price` | **Lowest variant price**, **Default variant price**, **Highest variant price** | **Lowest variant price** |
+| `sale_price` | **Lowest-priced variant’s sale price**, **Default variant’s sale price** | **Lowest-priced variant’s sale price** |
+| `availability` | **In stock when any variant is**, **Default variant’s availability** | **In stock when any variant is** |
+| `inventory_quantity` | **Total across variants**, **Default variant’s stock** | **Total across variants** |
+
+Each calculation reads the variants' prices and stock in the feed's store, worked out the same way as on a variant feed. Disabled variants are not counted. A product with no enabled variants has no calculated price. A shopping feed excludes the product unless `price` has a **Default value**. A Klaviyo feed sends the product without `price`.
+
+- The lowest and highest prices read the variants that are in stock. When no variant is, they read every variant, so the item still has a price.
+- A sale price appears only when the variant the option reads is on promotion: the lowest-priced variant or the default variant. A promotion on another variant does not produce one. When `price` is mapped to a calculation, a sale price that isn't lower than it is left off.
+- **In stock when any variant is** sends `in_stock` when at least one variant is in stock under the rules in [availability values](../reference/attributes.md#availability-values).
+- **Total across variants** adds up the stock of the variants available for purchase. When one of them doesn't track inventory, or no variant is available for purchase, the item has no `inventory_quantity`.
+
+A product feed's dropdowns list product fields only.
+
+### Klaviyo feeds
+
+Choose **Commerce products** to show each product once in Klaviyo's product blocks and recommendations. Choose **Commerce variants** to list each variant on its own, such as for a back in stock flow on one size.
+
+If the site uses Klaviyo Connect, set **Catalog Item ID** in its **Product Type Data Mapping** table, under **Settings -> Plugins -> Klaviyo Connect**, for each product type in the feed.
+
+Klaviyo matches the products in its events to catalog items by ID, so the feed's `id` has to match the ID your events send.
+
+| Source | One item per | `id` | Klaviyo Connect's **Catalog Item ID** |
+|---|---|---|---|
+| Commerce products | product | the product ID | **Product ID** |
+| Commerce variants | variant | the variant SKU | **Variant SKU** |
 
 ## Twig values
 
@@ -69,7 +105,7 @@ A new variant or entry feed is saved partly mapped: `title` and `link` use the p
 
 | Variable | Holds |
 |---|---|
-| `object` | The variant, the entry, or a custom source's element. Its properties and fields are also variables of their own, such as `title`, `sku`, or `product` |
+| `object` | The variant, the product, the entry, or a custom source's element. Its properties and fields are also variables of their own, such as `title`, `sku`, or `product` |
 | `item` | On a custom source's feed, the values the source supplied for this item, such as `item.id` and `item.size` |
 | Source variables | On a custom source's feed, any variables the source passes for the item |
 
@@ -113,7 +149,7 @@ After a build, the **Last build** column reports how each mapped row did:
 | `Discarded an image URL the site couldn’t resolve on 2 items. Check the site’s base URL.` | An image URL was relative and the site's base URL isn't absolute, or the URL isn't `http` or `https`. The first one is shown beneath. |
 | `-` | Not mapped, or the feed has never built. |
 
-Attributes set to **Don’t include** are not counted.
+Attributes set to **Don’t include** are not counted. On a product feed, the plugin does not count blanks on a row mapped to a calculation. The row shows `-`, or a count of items priced at zero or less.
 
 ## Excluded items
 

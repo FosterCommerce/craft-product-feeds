@@ -154,6 +154,9 @@ final class FeedEditVariables
 			}
 
 			$mappingSource = $feed->mappingSource($name, $spec);
+			$parsedMapping = Mapping::parse($mappingSource);
+			// A calculation's blanks are not counted, so its row can't claim every item
+			$isCalculated = $parsedMapping['kind'] === Mapping::ELEMENT && $source->isCalculatedPath($parsedMapping['value']);
 			// Subtract Twig failures, which also count as blanks but get their own message.
 			$blanks = ($diagnostics->blankByAttribute[$name] ?? 0) - ($diagnostics->twigErrorsByAttribute[$name] ?? 0);
 			$blanks = $blanks > 0 ? $blanks : null;
@@ -173,7 +176,7 @@ final class FeedEditVariables
 			// Only an attribute the feed carries, with nothing reported against it, was set on every item. The
 			// gallery is excluded: a blank one is normal.
 			$setOnAllItems = null;
-			if ($blanks === null && $invalid === null && $relativeUrls === null && ! isset($diagnostics->twigErrorsByAttribute[$name]) && $mappingSource !== Mapping::NO_INCLUDE && $name !== $galleryAttribute) {
+			if (! $isCalculated && $blanks === null && $invalid === null && $relativeUrls === null && ! isset($diagnostics->twigErrorsByAttribute[$name]) && $mappingSource !== Mapping::NO_INCLUDE && $name !== $galleryAttribute) {
 				$setOnAllItems = $feed->lastBuildItemCount;
 			}
 

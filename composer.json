@@ -1,6 +1,6 @@
 {
 	"name": "fostercommerce/product-feeds",
-	"description": "Build auto-updating product feeds for shopping and social platforms from Craft Commerce variants, Craft entries, or custom sources.",
+	"description": "Build auto-updating product feeds for shopping and social platforms from Craft Commerce products and variants, Craft entries, or custom sources.",
 	"homepage": "https://github.com/FosterCommerce/craft-product-feeds",
 	"type": "craft-plugin",
 	"keywords": [

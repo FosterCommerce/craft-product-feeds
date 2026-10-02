@@ -14,9 +14,9 @@ One row per feed. A feed belongs to one site. The row stores only the last build
 | `name` | string | What the admin called the feed. |
 | `handle` | string | Unique per site, so the same handle can repeat on each of a store's sites. Appears in the feed URL. |
 | `platform` | string(16) | `google`, `klaviyo`, `meta`, `microsoft`, `pinterest`, or `tiktok`. |
-| `source` | string | `variants`, `entries`, or a custom source's handle. |
+| `source` | string | `variants`, `products`, `entries`, or a custom source's handle. |
 | `siteId` | integer | Foreign key to `sites.id`, `ON DELETE CASCADE`. Indexed. |
-| `sourceIds` | text | JSON. Product type IDs for a variant feed, `sectionId:entryTypeId` pairs for an entry feed. Empty means every product type or section with a public URL. Ignored on a custom source's feed. |
+| `sourceIds` | text | JSON. Product type IDs for a variant or product feed, `sectionId:entryTypeId` pairs for an entry feed. Empty means every product type or section with a public URL. Ignored on a custom source's feed. |
 | `fieldMapping` | mediumtext | JSON, keyed by attribute: `{"source": "...", "default": "...", "twig": "..."}`. A full mapping can exceed TEXT's 64 KB. |
 | `filterCondition` | mediumtext | JSON. A serialized `ElementCondition` config, applied to the source query. Always empty on a custom source's feed. |
 | `imageEngine` | string | `none`, `craft`, `imagerx`, or `smallpics`. Default: `none`. |

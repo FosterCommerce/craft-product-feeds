@@ -13,12 +13,15 @@ enum Source: string
 
 	case Variants = 'variants';
 
+	case Products = 'products';
+
 	case Entries = 'entries';
 
 	public function label(): string
 	{
 		return match ($this) {
 			self::Variants => Craft::t(ProductFeeds::HANDLE, 'source.variants'),
+			self::Products => Craft::t(ProductFeeds::HANDLE, 'source.products'),
 			self::Entries => Craft::t(ProductFeeds::HANDLE, 'source.entries'),
 		};
 	}

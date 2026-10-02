@@ -1,6 +1,6 @@
 # Installation
 
-Build auto-updating **product feeds** for shopping and social platforms from Craft Commerce variants, Craft entries, or custom sources.
+Build auto-updating product feeds for shopping and social platforms from Craft Commerce products and variants, Craft entries, or custom sources.
 
 ## Requirements
 
@@ -52,7 +52,7 @@ A crontab entry that checks every 15 minutes:
 */15 * * * * /path/to/craft product-feeds/feeds/build
 ```
 
-Keep the schedule even with **Rebuild when products change** on. That setting responds only to a product or entry being edited or deleted. A stock change does not edit the product, so the rebuild does not run; the next build recomputes `availability`.
+Keep the schedule even with **Rebuild when products change** on. That setting responds only to a product or entry being edited or deleted. A stock change does not edit the product, so the rebuild does not run; the next build recomputes `availability` and `inventory_quantity`.
 
 ## Queue
 

@@ -1,6 +1,6 @@
 # Product Feeds documentation
 
-Build auto-updating **product feeds** for shopping and social platforms from Craft Commerce variants, Craft entries, or custom sources.
+Build auto-updating product feeds for shopping and social platforms from Craft Commerce products and variants, Craft entries, or custom sources.
 
 ## Where to go
 

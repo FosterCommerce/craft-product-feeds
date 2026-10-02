@@ -1,6 +1,6 @@
 # Add a custom source
 
-A custom source determines which elements a feed reads and which items each element publishes, such as one item for each size an entry offers. A module or plugin registers it, and store admins pick it from a feed's **Source** menu beside **Commerce variants** and **Entries**.
+A custom source determines which elements a feed reads and which items each element publishes, such as one item for each size an entry offers. A module or plugin registers it, and store admins pick it from a feed's **Source** menu beside **Commerce variants**, **Commerce products**, and **Entries**.
 
 A feed on a custom source has no **Product types**, **Entry types**, or **Filter** settings, because the source picks its own elements. The feed's mapping, image engine, and image size still apply.
 
@@ -10,7 +10,7 @@ Extend `fostercommerce\productfeeds\sources\CustomSource` and implement these me
 
 | Method | Returns |
 |---|---|
-| `static handle()` | A unique handle, not `variants` or `entries`. A handle already in use throws an exception wherever the plugin lists sources. The feed stores the handle, so do not change it once a feed uses the source |
+| `static handle()` | A unique handle, not `variants`, `products`, or `entries`. A handle already in use throws an exception wherever the plugin lists sources. The feed stores the handle, so do not change it once a feed uses the source |
 | `static displayName()` | The label in the **Source** menu |
 | `query()` | An element query for the elements the feed reads, scoped to `$this->feed->siteId`. Limit the query to live elements; the plugin publishes every element the query returns |
 | `elementType()` | The class of those elements |
@@ -33,6 +33,54 @@ An element whose `items()` returns an empty array does not publish an item, and 
 A `SuppliedItem`'s `variables` are available to the feed's [Twig values](../user-guide/mapping.md#twig-values), beside `object` (the element) and `item` (the item's `values`). Pass what a template needs to tell one item from another, such as the row a size came from. With Craft's Twig sandbox on, a template can read an element's fields, Craft's own properties, and any array key. Pass arrays or scalars, not models.
 
 The info icon beside each Twig value lists these variables. The plugin reads them from the first item of the source's first element, and shows an element by its type and an array by its keys.
+
+## Mapping choices
+
+Each attribute's dropdown on the **Mapping** tab offers the element's own values under **Properties**: its title, URL, slug, and ID. Image attributes offer fields only, and the plugin does not call either method for them. To change the values, override either method:
+
+| Method | Returns |
+|---|---|
+| `elementPaths()` | The values every attribute offers |
+| `elementPathsFor($attribute)` | The values one attribute offers, by attribute handle. Defaults to `elementPaths()` |
+
+Both return group label => (path => label). The plugin translates the group label in its own category, and a label it has no translation for shows as written. A path is read from the element one dot-separated segment at a time, through a getter where one exists, such as `author.username`.
+
+To offer a value the element has no property for, return a path of your own from `elementPathsFor()` and override `resolve()` to calculate it. These overrides offer the smallest size's price on `price` only, for a feed that publishes one item per poster:
+
+```php
+use craft\base\ElementInterface;
+use fostercommerce\productfeeds\feeds\AttributeDefinition;
+use fostercommerce\productfeeds\helpers\Mapping;
+
+public function elementPathsFor(string $attribute): array
+{
+	if ($attribute !== 'price') {
+		return $this->elementPaths();
+	}
+
+	return [
+		'Poster prices' => [
+			'smallestSizePrice' => 'Smallest size price',
+		],
+		...$this->elementPaths(),
+	];
+}
+
+public function resolve(ElementInterface $element, array $mapping, AttributeDefinition $attributeDefinition): array
+{
+	if ($mapping['kind'] !== Mapping::ELEMENT || $mapping['value'] !== 'smallestSizePrice') {
+		return parent::resolve($element, $mapping, $attributeDefinition);
+	}
+
+	$prices = array_column($element->getFieldValue('sizes') ?? [], 'price');
+
+	return $this->normalizeValue($prices === [] ? null : (string) min($prices), $attributeDefinition);
+}
+```
+
+Pass `price` and `sale_price` to `normalizeValue()` as decimal strings, as in `items()`.
+
+A blank mapped value counts toward the attribute's **Last build** column. When a blank calculation is expected, such as a sale price on an item with no promotion, override `isCalculatedPath($path)` to return `true` for that path. The plugin then does not count its blanks, and the row shows `-` in place of a count.
 
 ## Minimal example
 

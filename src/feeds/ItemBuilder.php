@@ -95,7 +95,7 @@ final readonly class ItemBuilder
 			if ($values === []) {
 				// A computed `sale_price` is null on every item not on promotion, and "Don't include" is blank on
 				// all of them, so only a mapped attribute's blanks mean anything.
-				if (! $isComputed && $this->isMapped($attributeName)) {
+				if (! $isComputed && $this->isMapped($attributeName) && ! $this->isCalculated($attributeName)) {
 					$this->buildDiagnostics->countBlank($attributeName);
 				}
 
@@ -297,6 +297,12 @@ final readonly class ItemBuilder
 		return $this->mappings[$galleryAttribute]['kind'] === Mapping::IMAGE_OVERFLOW
 			? array_slice($imageValues, 1, FeedSpec::MAX_GALLERY_IMAGES)
 			: array_slice($mappedValues, 0, FeedSpec::MAX_GALLERY_IMAGES);
+	}
+
+	private function isCalculated(string $attribute): bool
+	{
+		return $this->mappings[$attribute]['kind'] === Mapping::ELEMENT
+			&& $this->feedSource->isCalculatedPath($this->mappings[$attribute]['value']);
 	}
 
 	private function isMapped(string $attribute): bool

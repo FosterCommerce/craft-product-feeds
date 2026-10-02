@@ -72,7 +72,7 @@ final class MappingOptions
 
 		// No native element value is an image, so image attributes offer field sources only.
 		if ($attributeDefinition->attributeKind !== AttributeKind::Image) {
-			foreach ($source->elementPaths() as $groupLabel => $paths) {
+			foreach ($source->elementPathsFor($attributeDefinition->name) as $groupLabel => $paths) {
 				if ($paths === []) {
 					continue;
 				}

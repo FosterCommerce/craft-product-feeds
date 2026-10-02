@@ -19,6 +19,7 @@ return [
 	'platform.pinterest' => 'Pinterest catalogs',
 	'platform.tiktok' => 'TikTok catalogs',
 	'source.variants' => 'Commerce variants',
+	'source.products' => 'Commerce products',
 	'source.entries' => 'Entries',
 	'source.missing' => '{source} (not available)',
 
@@ -69,7 +70,7 @@ return [
 	'feed.handleLabel' => 'Handle',
 	'feed.platformLabel' => 'Platform',
 	'feed.sourceLabel' => 'Source',
-	'feed.sourceInstructions' => 'Commerce variants for a normal catalog. Entries for configurator and made-to-measure stores, where what you advertise is a page. A module or plugin can add other sources.',
+	'feed.sourceInstructions' => 'Commerce variants for a normal catalog, with one item per variant. Commerce products for one item per product. Entries for configurator and made-to-measure stores, where what you advertise is a page. A module or plugin can add other sources.',
 	'feed.filterLabel' => 'Filter',
 	'feed.filterInstructions' => 'Only items matching every rule are included. Leave empty to include them all.',
 	'filter.addRule' => 'Add a filter',
@@ -116,6 +117,7 @@ return [
 	'mapping.imageOverflow' => 'Extra images from {attribute}',
 	'mapping.variantProperties' => 'Variant properties',
 	'mapping.productProperties' => 'Product properties',
+	'mapping.variantCalculations' => 'Calculated from variants',
 	'mapping.entryProperties' => 'Entry properties',
 	'mapping.variantFields' => 'Variant fields',
 	'mapping.entryFields' => 'Entry fields',
@@ -150,6 +152,7 @@ return [
 
 	// Twig variables
 	'twig.variant' => 'Variant, with its product as {{ product }}',
+	'twig.product' => 'Product',
 	'twig.entry' => 'Entry',
 	'twig.keys' => 'Keys: {keys}',
 

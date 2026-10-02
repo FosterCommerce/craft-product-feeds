@@ -1,5 +1,13 @@
 # Release Notes for Product Feeds
 
+## 1.4.0 - 2026-10-02
+
+### Added
+- Added the “Commerce products” source, for feeds with one item per product.
+- Added `fostercommerce\productfeeds\sources\ProductSource`.
+- Added `FeedSource::elementPathsFor()`.
+- Added `FeedSource::isCalculatedPath()`.
+
 ## 1.3.0 - 2026-09-25
 
 ### Added

@@ -28,6 +28,7 @@ The **Excluded items** panel on the feed's **Mapping** tab lists the missing ite
 - `link`: the product or entry has no URL, or the URL is relative. Check that the site's base URL is absolute in the environment the queue runs in.
 - `image_link`: no asset, or the asset's filesystem has no public URLs.
 - `description`: the field is empty on that item.
+- `price`: on a product feed, the product has no enabled variant.
 
 A Meta or TikTok feed also excludes items with no `brand` or `condition`. Google, Microsoft, and Pinterest treat both as optional.
 
@@ -61,7 +62,7 @@ The feed does not send per-item shipping or tax. Set them in your account on the
 
 The **Mapping** tab shows a count under `price` after each build. The feed sends those items with a price of `0.00`.
 
-A zero price means the mapped field holds `0`, or on a variant feed, that the variant's price in Commerce is `0`. An empty price field does not send `0.00`; the item is excluded instead.
+A zero price means the mapped field holds `0`, or on a variant or product feed, that a variant's price in Commerce is `0`. An empty price field does not send `0.00`; the item is excluded instead.
 
 ## The platform rejects the price
 
