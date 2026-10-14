@@ -1,5 +1,10 @@
 # Release Notes for Product Feeds
 
+## 1.5.1 - 2026-10-14
+
+### Fixed
+- Fixed a bug where every queued build failed with “Class "fostercommerce\productfeeds\models\QueuedBuildState" not found”.
+
 ## 1.5.0 - 2026-10-14
 
 ### Added
