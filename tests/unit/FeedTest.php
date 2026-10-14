@@ -50,6 +50,21 @@ class FeedTest extends TestCase
 	}
 
 	/**
+	 * A token rotated mid-build must not orphan the build's saved batches, so the path is keyed by ID.
+	 */
+	public function testQueuedBuildsAreSavedUnderTheFeedIdNotItsToken(): void
+	{
+		$feed = $this->feed(Platform::Klaviyo);
+		$feed->id = 42;
+
+		$path = $feed->getQueuedBuildsPath();
+		$feed->token = str_repeat('b', Feed::TOKEN_LENGTH);
+
+		$this->assertSame('product-feeds/builds/42', $path);
+		$this->assertSame($path, $feed->getQueuedBuildsPath());
+	}
+
+	/**
 	 * `clone` carries the resolved spec over, so a copy given a new platform would keep the old one.
 	 */
 	public function testACloneResolvesItsOwnSpec(): void

@@ -4,7 +4,10 @@ declare(strict_types=1);
 
 namespace fostercommerce\productfeeds\tests\integration;
 
+use Craft;
+use craft\fields\Assets;
 use fostercommerce\productfeeds\enums\Availability;
+use fostercommerce\productfeeds\enums\ImageEngine;
 use fostercommerce\productfeeds\enums\Platform;
 use fostercommerce\productfeeds\errors\FeedBuildException;
 use fostercommerce\productfeeds\feeds\FeedSpec;
@@ -192,6 +195,73 @@ class BuildsTest extends IntegrationTestCase
 		foreach (['id', 'item_group_id', 'price', 'sale_price', 'availability'] as $attribute) {
 			$this->assertContains($attribute, $computed);
 		}
+	}
+
+	/**
+	 * The image test reports how many images a build would have to generate, which is what makes a
+	 * first build with a new transform slow.
+	 */
+	public function testTheImageTestCountsTheImagesAlreadyGeneratedAtACraftTransform(): void
+	{
+		$feed = $this->googleFeed('imageCount');
+		$imageField = $this->firstAssetsField($feed);
+		$namedTransform = Craft::$app->getImageTransforms()->getAllTransforms()[0] ?? null;
+
+		if ($imageField === null || $namedTransform === null) {
+			$this->markTestSkipped('This install has no Assets field on its variants or products, or no named image transform.');
+		}
+
+		$feed->fieldMapping['image_link'] = [
+			'source' => Mapping::build($imageField['kind'], $imageField['handle']),
+			'default' => '',
+			'twig' => '',
+		];
+		$feed->imageEngine = ImageEngine::Craft->value;
+		$feed->imageTransform = $namedTransform->handle;
+
+		$result = $this->builds()->testImage($feed);
+
+		$this->assertNotNull($result->imageCount, 'A Craft transform on an Assets field reports an image count.');
+		$this->assertNotNull($result->generatedImageCount);
+		$this->assertGreaterThan(0, $result->imageCount);
+		$this->assertGreaterThanOrEqual(0, $result->generatedImageCount);
+		$this->assertLessThanOrEqual($result->imageCount, $result->generatedImageCount);
+	}
+
+	public function testTheImageTestHasNoImageCountWithoutACraftTransform(): void
+	{
+		$feed = $this->googleFeed('imageCountNone');
+
+		$this->assertNull($this->builds()->testImage($feed)->imageCount);
+	}
+
+	/**
+	 * Product fields first, since a store usually keeps its images on the product rather than the variant.
+	 *
+	 * @return array{kind: string, handle: string}|null
+	 */
+	private function firstAssetsField(Feed $feed): ?array
+	{
+		$fieldLayoutsByKind = FeedSource::forFeed($feed)->fieldLayouts();
+		$fieldLayoutsByKind = [
+			Mapping::PRODUCT_FIELD => $fieldLayoutsByKind[Mapping::PRODUCT_FIELD] ?? [],
+			...$fieldLayoutsByKind,
+		];
+
+		foreach ($fieldLayoutsByKind as $kind => $fieldLayouts) {
+			foreach ($fieldLayouts as $fieldLayout) {
+				foreach ($fieldLayout->getCustomFields() as $field) {
+					if ($field instanceof Assets && $field->handle !== null) {
+						return [
+							'kind' => $kind,
+							'handle' => $field->handle,
+						];
+					}
+				}
+			}
+		}
+
+		return null;
 	}
 
 	/**

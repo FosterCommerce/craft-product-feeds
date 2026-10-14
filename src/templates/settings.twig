@@ -38,6 +38,7 @@
 	type: 'number',
 	value: settings.buildInterval,
 	errors: settings.getErrors('buildInterval'),
+	warning: craft.app.config.general.runQueueAutomatically ? 'settings.webQueueWarning'|t('product-feeds'),
 }) }}
 
 {{ forms.lightswitchField({

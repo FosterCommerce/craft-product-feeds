@@ -109,6 +109,7 @@ return [
 	'imageTest.notAnImage' => 'The URL did not return an image. It answered with HTTP {status} ({contentType}).',
 	'imageTest.meetsMinimum' => 'Meets the {width}x{height} minimum.',
 	'imageTest.belowMinimum' => 'Below the {width}x{height} minimum.',
+	'imageTest.generatedCount' => '{generated} of {total} main images already exist at this transform. A build creates the missing images.',
 
 	// Mapping
 	'mapping.dontInclude' => 'Don’t include',
@@ -174,11 +175,12 @@ return [
 	'settings.filesystem' => 'Filesystem',
 	'settings.filesystemInstructions' => 'Where built feed files are stored.',
 	'settings.batchSize' => 'Batch size',
-	'settings.batchSizeInstructions' => 'How many elements a build loads per batch.',
+	'settings.batchSizeInstructions' => 'How many elements a build loads per batch. A queued build runs one batch per queue job.',
 	'settings.buildTimeout' => 'Build timeout',
 	'settings.buildTimeoutInstructions' => 'Seconds a build can run. Craft Cloud caps queue jobs at 15 minutes, whatever this setting says.',
 	'settings.buildInterval' => 'Build interval',
 	'settings.buildIntervalInstructions' => 'Seconds a feed can go without rebuilding. The scheduled command rebuilds a feed once its last build is older than this.',
+	'settings.webQueueWarning' => 'Craft runs queue jobs only when a web request starts the queue. A feed can wait unbuilt until the next request. To build feeds on schedule, run a queue worker and set `runQueueAutomatically` to `false`.',
 	'settings.rebuildOnChange' => 'Rebuild when products change',
 	'settings.rebuildOnChangeInstructions' => 'Rebuild a feed as soon as a product in it is edited or deleted, instead of waiting for the next scheduled build. A stock change on its own does not trigger a rebuild, but every build reads current stock.',
 

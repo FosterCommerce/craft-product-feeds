@@ -22,8 +22,8 @@ composer require fostercommerce/product-feeds
 ![The Product Feeds plugin settings: filesystem, batch size, build timeout, build interval, and rebuild when products change](../resources/img/plugin-settings.png)
 
 - **Filesystem**: where built feed files are stored. Required, no default. The plugin writes feeds to a `product-feeds/` directory inside it. Craft serves the feed from its own URL, so the filesystem doesn't need public URLs. To see why a public filesystem is a risk, see [troubleshooting](./user-guide/troubleshooting.md#the-filesystem-url-serves-the-feed-without-the-token). A local folder works only where the queue worker and the web server share a disk.
-- **Batch size**: how many elements a build loads per batch. Default: `500`.
-- **Build timeout**: seconds a build can run. Default: `3600`. Sets the queue job's time to run (TTR). A build still unfinished after this long counts as stalled, and the next `feeds/build` queues it again. Craft Cloud caps queue jobs at 15 minutes, whatever this setting says.
+- **Batch size**: how many elements a build loads per batch. A queued build loads each batch in its own queue job. Default: `500`.
+- **Build timeout**: seconds a build can run. Default: `3600`. Sets each queue job's time to run (TTR). A queued build must finish all its batches within this time. After that it counts as stalled, and the next `feeds/build` starts the build over. Craft Cloud caps queue jobs at 15 minutes, whatever this setting says.
 - **Build interval**: seconds a feed can go without rebuilding. Default: `3600`. The scheduled command rebuilds a feed once its last build is older than the interval.
 - **Rebuild when products change**: rebuilds a feed as soon as a product or entry in it is edited or deleted, without waiting for the next scheduled build. Editing several products in a row rebuilds the feed once. On by default. A stock change does not trigger a rebuild; see [building on a schedule](#building-on-a-schedule).
 
@@ -56,7 +56,7 @@ Keep the schedule even with **Rebuild when products change** on. That setting re
 
 ## Queue
 
-Unless your host runs the queue for you, run a supervised worker. By default Craft runs queue jobs during control panel requests, so a large build can hold up a page load. For the options, see [Craft's queue documentation](https://craftcms.com/docs/5.x/system/queue.html).
+Unless your host runs the queue for you, run a supervised worker. By default Craft runs queue jobs only when a web request starts the queue, such as a control panel visit. A feed can wait unbuilt until the next request. For the options, see [Craft's queue documentation](https://craftcms.com/docs/5.x/system/queue.html).
 
 ```sh
 ./craft queue/listen

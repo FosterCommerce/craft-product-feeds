@@ -227,6 +227,15 @@ class Feed extends Model implements Statusable
 	}
 
 	/**
+	 * Where a queued build saves its batches between queue runs. Keyed by ID, since the token can change
+	 * mid-build.
+	 */
+	public function getQueuedBuildsPath(): string
+	{
+		return sprintf('%s/builds/%d', ProductFeeds::FILE_PREFIX, (int) $this->id);
+	}
+
+	/**
 	 * The path the site route serves the feed from. The token identifies the feed; the handle is there
 	 * to make the URL readable.
 	 */

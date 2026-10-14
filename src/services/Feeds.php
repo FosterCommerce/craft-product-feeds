@@ -194,6 +194,7 @@ class Feeds extends Component
 		}
 
 		$this->deletePaths([$feed->getPath(), $feed->getExcludedReportPath()]);
+		$this->findFs()?->deleteDirectory($feed->getQueuedBuildsPath());
 
 		FeedRecord::deleteAll([
 			'id' => $id,

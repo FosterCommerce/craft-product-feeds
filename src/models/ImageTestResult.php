@@ -23,6 +23,8 @@ final readonly class ImageTestResult
 		public ?int $minimumWidth,
 		public ?int $minimumHeight,
 		public ?string $error,
+		public ?int $generatedImageCount,
+		public ?int $imageCount,
 	) {
 	}
 
@@ -30,8 +32,9 @@ final readonly class ImageTestResult
 	 * No image to fetch, or the fetch itself threw.
 	 *
 	 * @param array{0: int, 1: int}|null $minimumSize
+	 * @param array{generated: int, total: int}|null $transformCoverage
 	 */
-	public static function failed(?array $minimumSize, string $error, ?string $url = null): self
+	public static function failed(?array $minimumSize, string $error, ?string $url = null, ?array $transformCoverage = null): self
 	{
 		return new self(
 			ok: false,
@@ -44,6 +47,8 @@ final readonly class ImageTestResult
 			minimumWidth: $minimumSize[0] ?? null,
 			minimumHeight: $minimumSize[1] ?? null,
 			error: $error,
+			generatedImageCount: $transformCoverage['generated'] ?? null,
+			imageCount: $transformCoverage['total'] ?? null,
 		);
 	}
 
@@ -51,6 +56,7 @@ final readonly class ImageTestResult
 	 * The image answered. A 404 page or an HTML error body is not a usable image.
 	 *
 	 * @param array{0: int, 1: int}|null $minimumSize
+	 * @param array{generated: int, total: int}|null $transformCoverage
 	 */
 	public static function fetched(
 		?array $minimumSize,
@@ -59,6 +65,7 @@ final readonly class ImageTestResult
 		?string $contentType,
 		?int $width,
 		?int $height,
+		?array $transformCoverage = null,
 	): self {
 		$decoded = $width !== null && $height !== null;
 
@@ -74,6 +81,8 @@ final readonly class ImageTestResult
 			minimumWidth: $minimumSize[0] ?? null,
 			minimumHeight: $minimumSize[1] ?? null,
 			error: null,
+			generatedImageCount: $transformCoverage['generated'] ?? null,
+			imageCount: $transformCoverage['total'] ?? null,
 		);
 	}
 }

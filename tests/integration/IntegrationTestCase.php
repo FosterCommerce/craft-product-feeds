@@ -158,6 +158,31 @@ abstract class IntegrationTestCase extends TestCase
 	}
 
 	/**
+	 * A Klaviyo feed. `inventory_policy` is the one field Klaviyo needs beyond the shared defaults.
+	 */
+	protected function klaviyoFeed(string $handle): Feed
+	{
+		return $this->buildableFeed($handle, Platform::Klaviyo, [
+			'inventory_policy' => [
+				'source' => Mapping::USE_DEFAULT,
+				'default' => '1',
+			],
+		]);
+	}
+
+	/**
+	 * @return list<array<string, mixed>>
+	 */
+	protected function publishedItems(Feed $feed): array
+	{
+		$items = json_decode($this->publishedArtifact($feed), true, 512, JSON_THROW_ON_ERROR);
+		$this->assertIsList($items);
+
+		/** @var list<array<string, mixed>> $items */
+		return $items;
+	}
+
+	/**
 	 * Builds the feed, skipping the test where the install itself cannot produce one (no Commerce store
 	 * on the site, no source with public URLs).
 	 *

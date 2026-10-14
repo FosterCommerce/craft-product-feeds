@@ -8,9 +8,17 @@ use Craft;
 use craft\base\Component;
 use craft\base\ElementInterface;
 use craft\base\FsInterface;
+use craft\commerce\db\Table as CommerceTable;
 use craft\commerce\models\Store;
+use craft\db\Query;
+use craft\db\Table;
 use craft\errors\FsException;
 use craft\helpers\FileHelper;
+use craft\helpers\ImageTransforms;
+use craft\helpers\Json;
+use craft\helpers\StringHelper;
+use craft\models\FsListing;
+use craft\models\ImageTransform as CraftImageTransform;
 use DateTime;
 use fostercommerce\productfeeds\enums\BuildStatus;
 use fostercommerce\productfeeds\enums\ImageEngine;
@@ -26,6 +34,8 @@ use fostercommerce\productfeeds\models\BuildDiagnostics;
 use fostercommerce\productfeeds\models\BuildResult;
 use fostercommerce\productfeeds\models\Feed;
 use fostercommerce\productfeeds\models\ImageTestResult;
+use fostercommerce\productfeeds\models\ImageTransform;
+use fostercommerce\productfeeds\models\QueuedBuildState;
 use fostercommerce\productfeeds\models\UrlCheck;
 use fostercommerce\productfeeds\ProductFeeds;
 use fostercommerce\productfeeds\sources\CustomSource;
@@ -38,10 +48,13 @@ use yii\base\InvalidConfigException;
 
 class Builds extends Component
 {
+	private const BATCH_JSON_FLAGS = JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE | JSON_INVALID_UTF8_SUBSTITUTE;
+
 	/**
-	 * The entry point for any live build: the queue job and the console command.
+	 * The entry point for a live build in one process: the console command. Queued builds run one batch per
+	 * queue job, through `startQueuedBuild()`.
 	 *
-	 * Standing down is the caller's to handle: `BuildFeed` comes back later, the console reports it.
+	 * Standing down is the caller's to handle: the console reports it.
 	 *
 	 * @param (callable(int, int): void)|null $onProgress
 	 * @return BuildResult|null null when another build already holds the lock
@@ -74,7 +87,7 @@ class Builds extends Component
 
 	/**
 	 * Streams the whole catalog into the artifact and publishes it. Takes no lock and records nothing:
-	 * a live build goes through `buildUnderLock()`.
+	 * a live build goes through `buildUnderLock()` or the queued build methods.
 	 *
 	 * @param (callable(int, int): void)|null $onProgress
 	 * @throws FeedBuildException on a configuration error that retrying cannot fix
@@ -103,20 +116,197 @@ class Builds extends Component
 
 		$itemCount = $this->writeItems($source, $writer, $report, $itemBuilder, $onProgress);
 
-		$bytes = (int) filesize($tempPath);
-		$bytesUncompressed = Gzip::uncompressedSize($tempPath);
+		return $this->publish($fs, $feed, $tempPath, $reportPath, $itemCount, $diagnostics);
+	}
 
-		try {
-			// `FeedController` sends the row's byte count as the response length, and the row is not
-			// updated until `buildAndRecord()` has this result back.
-			$this->publishReport($fs, $feed, $reportPath, $diagnostics->skippedCount() > 0);
-			$this->publishFile($fs, $tempPath, $feed->getPath());
-		} finally {
-			// `publishFile()` only clears the temp file it was handed, so a throw leaves the report's own.
-			FileHelper::unlink($reportPath);
+	/**
+	 * Starts a build the queue runs one batch per job, so no queue run walks the whole catalog. Call it
+	 * holding the feed's lock.
+	 *
+	 * @return string the build's ID, which every later run of the build passes back
+	 * @throws FeedBuildException
+	 * @throws FsException
+	 * @throws InvalidConfigException
+	 */
+	public function startQueuedBuild(Feed $feed): string
+	{
+		// Clear the pending flag before the checks, so a build that fails to start doesn't block the next request
+		ProductFeeds::plugin()->getBuildQueue()->clearPending((int) $feed->id);
+
+		$source = FeedSource::forFeed($feed);
+		$this->assertBuildable($feed, $feed->getSpec(), $source);
+		$fs = $this->feeds()->getFs();
+
+		$this->deleteExpiredQueuedBuilds($fs, $feed);
+
+		$startedAt = new DateTime();
+		$buildId = sprintf('%d-%s', $startedAt->getTimestamp(), StringHelper::randomString(8));
+
+		$elementIds = array_map(intval(...), $source->query()->ids());
+		$state = new QueuedBuildState(array_chunk($elementIds, max(1, ProductFeeds::plugin()->getSettings()->batchSize)));
+
+		$this->feeds()->recordBuild($feed, BuildStatus::Building, $startedAt);
+
+		// Save the state last. A saved state marks the build as running, and a build that failed to start
+		// would otherwise make new builds stand down until it expires.
+		$fs->write($this->statePath($feed, $buildId), $state->toJson());
+
+		return $buildId;
+	}
+
+	/**
+	 * Builds the next batch of a queued build and saves its items beside the build's state. Call it holding
+	 * the feed's lock.
+	 *
+	 * @throws FeedBuildException
+	 * @throws FsException
+	 * @throws InvalidConfigException
+	 * @throws Throwable
+	 */
+	public function buildNextQueuedBatch(Feed $feed, string $buildId): QueuedBuildState
+	{
+		$fs = $this->feeds()->getFs();
+		$state = $this->queuedBuildState($fs, $feed, $buildId);
+
+		// A retried run finds its batch already saved, since the state is written after the batch.
+		if (! $state->hasMoreBatches()) {
+			return $state;
 		}
 
-		return new BuildResult($itemCount, $bytes, $bytesUncompressed, $diagnostics);
+		$source = FeedSource::forFeed($feed);
+		$diagnostics = BuildDiagnostics::fromArray($state->diagnostics);
+		$itemBuilder = new ItemBuilder($feed, $feed->getSpec(), $source, $diagnostics);
+
+		/** @var ElementInterface[] $elements */
+		$elements = $source->query()
+			->id($state->elementIdBatches[$state->nextBatch])
+			->fixedOrder()
+			->all();
+		$source->prepareBatch($elements);
+
+		$batch = [
+			'items' => [],
+			'excluded' => [],
+		];
+		foreach ($elements as $element) {
+			$elementItems = $this->itemsForElement($source, $itemBuilder, $element, $state->publishedIds);
+			array_push($batch['items'], ...$elementItems['items']);
+			array_push($batch['excluded'], ...$elementItems['excluded']);
+		}
+
+		$fs->write($this->batchPath($feed, $buildId, $state->nextBatch), Json::encode($batch, self::BATCH_JSON_FLAGS));
+
+		$state->diagnostics = $diagnostics->toArray();
+		$state->nextBatch++;
+		$fs->write($this->statePath($feed, $buildId), $state->toJson());
+
+		return $state;
+	}
+
+	/**
+	 * Writes a queued build's batches into the feed, publishes it and records the result. Call it holding
+	 * the feed's lock, once every batch is built.
+	 *
+	 * @throws Exception
+	 * @throws FeedBuildException
+	 * @throws FsException
+	 * @throws InvalidConfigException
+	 * @throws Throwable
+	 */
+	public function finishQueuedBuild(Feed $feed, string $buildId): BuildResult
+	{
+		$fs = $this->feeds()->getFs();
+		$state = $this->queuedBuildState($fs, $feed, $buildId);
+
+		$tempDirectory = Craft::$app->getPath()->getTempPath();
+		$tempPath = sprintf('%s/%s', $tempDirectory, $feed->getFileName());
+		$reportPath = sprintf('%s/%s', $tempDirectory, $feed->getExcludedReportFileName());
+
+		$writer = $feed->getSpec()->writer($tempPath, $feed->name, $feed->getSiteBaseUrl());
+		$report = new ExcludedReport($reportPath);
+		$itemCount = 0;
+
+		$writer->open();
+
+		try {
+			foreach (array_keys($state->elementIdBatches) as $batchIndex) {
+				/** @var array{items: list<array<string, string|list<string>>>, excluded: list<array{id: string, title: string, cpUrl: string, issue: string}>} $batch */
+				$batch = Json::decode($fs->read($this->batchPath($feed, $buildId, $batchIndex)));
+
+				foreach ($batch['items'] as $item) {
+					$writer->writeItem($item);
+					$itemCount++;
+				}
+
+				foreach ($batch['excluded'] as $reportRow) {
+					$report->write($reportRow);
+				}
+
+				$writer->flush();
+			}
+
+			$writer->close();
+			$report->close();
+		} catch (Throwable $throwable) {
+			$writer->abort();
+			$report->abort();
+
+			throw $throwable;
+		}
+
+		$result = $this->publish($fs, $feed, $tempPath, $reportPath, $itemCount, BuildDiagnostics::fromArray($state->diagnostics));
+
+		// The route 404s until the feed row carries the artifact's size.
+		$feeds = $this->feeds();
+		$feeds->recordBuild($feed, BuildStatus::Ok, result: $result);
+		$feeds->recordUrlCheck($feed, $this->checkFeedUrl($feeds->getFeedUrl($feed)));
+
+		$fs->deleteDirectory($this->queuedBuildDirectory($feed, $buildId));
+
+		return $result;
+	}
+
+	/**
+	 * Logs the error in full and records the failure on the feed, where the feeds index shows its message.
+	 *
+	 * @throws InvalidConfigException
+	 */
+	public function recordQueuedBuildFailure(Feed $feed, ?string $buildId, Throwable $throwable): void
+	{
+		Craft::error(sprintf('Building the “%s” product feed failed: %s', $feed->handle, $throwable), ProductFeeds::HANDLE);
+
+		$this->feeds()->recordBuild($feed, BuildStatus::Failed, error: $throwable->getMessage());
+
+		// Delete the state after a configuration error, which the queue never retries
+		if ($buildId !== null && $throwable instanceof FeedBuildException) {
+			$this->feeds()->findFs()?->deleteDirectory($this->queuedBuildDirectory($feed, $buildId));
+		}
+	}
+
+	/**
+	 * Whether a queued build's state is still saved. A later build deletes the state of a build older than the
+	 * build timeout, and that build's remaining queue jobs have no batches left to build.
+	 *
+	 * @throws FeedBuildException
+	 * @throws FsException
+	 * @throws InvalidConfigException
+	 */
+	public function queuedBuildExists(Feed $feed, string $buildId): bool
+	{
+		return $this->feeds()->getFs()->fileExists($this->statePath($feed, $buildId));
+	}
+
+	/**
+	 * Whether a queued build of the feed started within the build timeout and has not finished.
+	 *
+	 * @throws FsException
+	 * @throws InvalidConfigException
+	 */
+	public function isQueuedBuildRunning(Feed $feed): bool
+	{
+		$fs = $this->feeds()->findFs();
+
+		return $fs instanceof FsInterface && $this->queuedBuildIds($fs, $feed, expired: false) !== [];
 	}
 
 	/**
@@ -217,12 +407,14 @@ class Builds extends Component
 			return ImageTestResult::failed($minimumSize, Craft::t(ProductFeeds::HANDLE, 'imageTest.noProduct'));
 		}
 
+		$transformCoverage = $this->craftTransformCoverage($feed, $source, $attributeDefinition->name);
+
 		$source->prepareBatch([$element]);
 		$itemBuilder = new ItemBuilder($feed, $spec, $source, new BuildDiagnostics());
 		$imageValue = $itemBuilder->forElement($element, $source->items($element)[0] ?? new SuppliedItem())[$attributeDefinition->name] ?? null;
 		$url = is_array($imageValue) ? ($imageValue[0] ?? null) : $imageValue;
 		if ($url === null || $url === '') {
-			return ImageTestResult::failed($minimumSize, Craft::t(ProductFeeds::HANDLE, 'imageTest.noUrl'));
+			return ImageTestResult::failed($minimumSize, Craft::t(ProductFeeds::HANDLE, 'imageTest.noUrl'), transformCoverage: $transformCoverage);
 		}
 
 		try {
@@ -232,7 +424,7 @@ class Builds extends Component
 				'http_errors' => false,
 			]);
 		} catch (Throwable $throwable) {
-			return ImageTestResult::failed($minimumSize, $throwable->getMessage(), $url);
+			return ImageTestResult::failed($minimumSize, $throwable->getMessage(), $url, $transformCoverage);
 		}
 
 		$size = @getimagesizefromstring((string) $response->getBody());
@@ -244,7 +436,94 @@ class Builds extends Component
 			$response->getHeaderLine('Content-Type') ?: null,
 			is_array($size) ? $size[0] : null,
 			is_array($size) ? $size[1] : null,
+			$transformCoverage,
 		);
+	}
+
+	/**
+	 * How many of the feed's images already exist at its Craft transform, out of how many it publishes.
+	 * Null unless the feed maps the image to an Assets field and resizes it with Craft.
+	 *
+	 * Reads Craft's transform index rather than the filesystem, so it stays fast on a large catalog.
+	 *
+	 * @return array{generated: int, total: int}|null
+	 * @throws InvalidConfigException
+	 */
+	private function craftTransformCoverage(Feed $feed, FeedSource $source, string $imageAttribute): ?array
+	{
+		$imageTransform = ImageTransform::fromFeed($feed);
+		if ($imageTransform->imageEngine !== ImageEngine::Craft || (! $imageTransform->hasNamedTransform() && ! $imageTransform->hasSize())) {
+			return null;
+		}
+
+		$mapping = Mapping::parse($feed->mappingSource($imageAttribute, $feed->getSpec()));
+		if ($mapping['kind'] !== Mapping::FIELD && $mapping['kind'] !== Mapping::PRODUCT_FIELD) {
+			return null;
+		}
+
+		$fieldId = null;
+		foreach ($source->fieldLayouts()[$mapping['kind']] ?? [] as $fieldLayout) {
+			$fieldId ??= $fieldLayout->getFieldByHandle($mapping['value'])?->id;
+		}
+
+		if ($fieldId === null) {
+			return null;
+		}
+
+		$elementIds = $source->query()->ids();
+		$ownerIds = $mapping['kind'] === Mapping::PRODUCT_FIELD
+			? (new Query())
+				->select(['primaryOwnerId'])
+				->distinct()
+				->from([CommerceTable::VARIANTS])
+				->where([
+					'id' => $elementIds,
+				])
+				->column()
+			: $elementIds;
+
+		// Each element's first image, which is the one the feed publishes as its main image
+		$assetIds = (new Query())
+			->select(['targetId'])
+			->distinct()
+			->from([Table::RELATIONS])
+			->where([
+				'fieldId' => $fieldId,
+				'sourceId' => $ownerIds,
+				'sortOrder' => 1,
+			])
+			->andWhere([
+				'or',
+				[
+					'sourceSiteId' => null,
+				],
+				[
+					'sourceSiteId' => $feed->siteId,
+				],
+			])
+			->column();
+
+		$craftTransform = ImageTransforms::normalizeTransform(
+			$imageTransform->hasNamedTransform() ? $imageTransform->namedTransform : $imageTransform->toConfig()
+		);
+		if (! $craftTransform instanceof CraftImageTransform) {
+			return null;
+		}
+
+		$generated = (new Query())
+			->from([Table::IMAGETRANSFORMINDEX])
+			->where([
+				'assetId' => $assetIds,
+				'transformString' => ImageTransforms::getTransformString($craftTransform),
+				'format' => $craftTransform->format,
+				'fileExists' => true,
+			])
+			->count('DISTINCT [[assetId]]');
+
+		return [
+			'generated' => (int) $generated,
+			'total' => count($assetIds),
+		];
 	}
 
 	/**
@@ -322,31 +601,15 @@ class Builds extends Component
 				$source->prepareBatch($batch);
 
 				foreach ($batch as $element) {
-					foreach ($source->items($element) as $suppliedItem) {
-						$item = $itemBuilder->forElement($element, $suppliedItem);
-						$missing = $itemBuilder->missingRequired($item);
+					$elementItems = $this->itemsForElement($source, $itemBuilder, $element, $publishedIds);
 
-						if ($missing !== null) {
-							$itemBuilder->recordSkip($element, $missing);
-							$report->write($this->reportRow($source, $element, $item, $missing));
-
-							continue;
-						}
-
-						$itemId = $item['id'] ?? null;
-						if (is_string($itemId)) {
-							if (isset($publishedIds[$itemId])) {
-								$itemBuilder->recordSkip($element, BuildDiagnostics::DUPLICATE_ID);
-								$report->write($this->reportRow($source, $element, $item, Craft::t(ProductFeeds::HANDLE, 'mapping.excludedDuplicateId')));
-
-								continue;
-							}
-
-							$publishedIds[$itemId] = true;
-						}
-
-						$writer->writeItem($itemBuilder->renameForDocument($item));
+					foreach ($elementItems['items'] as $item) {
+						$writer->writeItem($item);
 						$itemCount++;
+					}
+
+					foreach ($elementItems['excluded'] as $reportRow) {
+						$report->write($reportRow);
 					}
 				}
 
@@ -368,6 +631,151 @@ class Builds extends Component
 		}
 
 		return $itemCount;
+	}
+
+	/**
+	 * Builds an element's items, setting aside the ones the feed has to exclude.
+	 *
+	 * @param array<array-key, true> $publishedIds ids already in the feed, which this adds to
+	 * @return array{items: list<array<string, string|list<string>>>, excluded: list<array{id: string, title: string, cpUrl: string, issue: string}>}
+	 * @throws InvalidConfigException
+	 * @throws Throwable
+	 */
+	private function itemsForElement(FeedSource $source, ItemBuilder $itemBuilder, ElementInterface $element, array &$publishedIds): array
+	{
+		$items = [];
+		$excluded = [];
+
+		foreach ($source->items($element) as $suppliedItem) {
+			$item = $itemBuilder->forElement($element, $suppliedItem);
+			$missing = $itemBuilder->missingRequired($item);
+
+			if ($missing !== null) {
+				$itemBuilder->recordSkip($element, $missing);
+				$excluded[] = $this->reportRow($source, $element, $item, $missing);
+
+				continue;
+			}
+
+			$itemId = $item['id'] ?? null;
+			if (is_string($itemId)) {
+				if (isset($publishedIds[$itemId])) {
+					$itemBuilder->recordSkip($element, BuildDiagnostics::DUPLICATE_ID);
+					$excluded[] = $this->reportRow($source, $element, $item, Craft::t(ProductFeeds::HANDLE, 'mapping.excludedDuplicateId'));
+
+					continue;
+				}
+
+				$publishedIds[$itemId] = true;
+			}
+
+			$items[] = $itemBuilder->renameForDocument($item);
+		}
+
+		return [
+			'items' => $items,
+			'excluded' => $excluded,
+		];
+	}
+
+	/**
+	 * @throws Exception
+	 * @throws FeedBuildException
+	 * @throws FsException
+	 */
+	private function publish(
+		FsInterface $fs,
+		Feed $feed,
+		string $tempPath,
+		string $reportPath,
+		int $itemCount,
+		BuildDiagnostics $diagnostics,
+	): BuildResult {
+		$bytes = (int) filesize($tempPath);
+		$bytesUncompressed = Gzip::uncompressedSize($tempPath);
+
+		try {
+			// `FeedController` sends the row's byte count as the response length, and the row is not
+			// updated until this result is recorded.
+			$this->publishReport($fs, $feed, $reportPath, $diagnostics->skippedCount() > 0);
+			$this->publishFile($fs, $tempPath, $feed->getPath());
+		} finally {
+			// `publishFile()` only clears the temp file it was handed, so a throw leaves the report's own.
+			FileHelper::unlink($reportPath);
+		}
+
+		return new BuildResult($itemCount, $bytes, $bytesUncompressed, $diagnostics);
+	}
+
+	private function queuedBuildDirectory(Feed $feed, string $buildId): string
+	{
+		return sprintf('%s/%s', $feed->getQueuedBuildsPath(), $buildId);
+	}
+
+	private function statePath(Feed $feed, string $buildId): string
+	{
+		return sprintf('%s/state.json', $this->queuedBuildDirectory($feed, $buildId));
+	}
+
+	private function batchPath(Feed $feed, string $buildId, int $batchIndex): string
+	{
+		return sprintf('%s/%d.json', $this->queuedBuildDirectory($feed, $buildId), $batchIndex);
+	}
+
+	/**
+	 * @throws FsException
+	 */
+	private function queuedBuildState(FsInterface $fs, Feed $feed, string $buildId): QueuedBuildState
+	{
+		return QueuedBuildState::fromJson($fs->read($this->statePath($feed, $buildId)));
+	}
+
+	/**
+	 * Deletes the saved batches of builds that started longer ago than the build timeout, which a worker
+	 * stopped before they finished.
+	 *
+	 * @throws FsException
+	 * @throws InvalidConfigException
+	 */
+	private function deleteExpiredQueuedBuilds(FsInterface $fs, Feed $feed): void
+	{
+		foreach ($this->queuedBuildIds($fs, $feed, expired: true) as $buildId) {
+			$fs->deleteDirectory($this->queuedBuildDirectory($feed, $buildId));
+		}
+	}
+
+	/**
+	 * A build ID starts with the build's start time, so its age is read from its name.
+	 *
+	 * @return list<string>
+	 * @throws FsException
+	 * @throws InvalidConfigException
+	 */
+	private function queuedBuildIds(FsInterface $fs, Feed $feed, bool $expired): array
+	{
+		$directory = $feed->getQueuedBuildsPath();
+		if (! $fs->directoryExists($directory)) {
+			return [];
+		}
+
+		$cutoff = time() - ProductFeeds::plugin()->getSettings()->buildTimeout;
+		$buildIds = [];
+
+		/** @var FsListing $listing */
+		foreach ($fs->getFileList($directory, false) as $listing) {
+			if (! $listing->getIsDir()) {
+				continue;
+			}
+
+			$buildId = $listing->getBasename();
+			$startedAt = (int) strtok($buildId, '-');
+
+			if (($startedAt < $cutoff) === $expired) {
+				$buildIds[] = $buildId;
+			}
+		}
+
+		return $buildIds;
 	}
 
 	/**
@@ -428,6 +836,8 @@ class Builds extends Component
 		try {
 			$result = $this->build($feed, $onProgress);
 		} catch (Throwable $throwable) {
+			// Log the trace, since the feed row stores only the message
+			Craft::error(sprintf('Building the “%s” product feed failed: %s', $feed->handle, $throwable), ProductFeeds::HANDLE);
 			$feeds->recordBuild($feed, BuildStatus::Failed, $startedAt, error: $throwable->getMessage());
 
 			throw $throwable;

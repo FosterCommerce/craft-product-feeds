@@ -154,6 +154,21 @@
 			};
 		};
 
+		// Only a Craft transform on an Assets field comes back with an image count.
+		const appendImageCount = (result) => {
+			if (result.imageCount === null) {
+				return;
+			}
+
+			const countParagraph = document.createElement('p');
+			countParagraph.className = 'light';
+			countParagraph.textContent = Craft.t('product-feeds', 'imageTest.generatedCount', {
+				generated: result.generatedImageCount,
+				total: result.imageCount,
+			});
+			testOutput.append(countParagraph);
+		};
+
 		const renderTest = (result) => {
 			testOutput.replaceChildren();
 
@@ -167,6 +182,7 @@
 					contentType: result.contentType ?? '?',
 				});
 				testOutput.append(errorParagraph);
+				appendImageCount(result);
 				return;
 			}
 
@@ -204,6 +220,7 @@
 			}
 
 			testOutput.append(linkParagraph);
+			appendImageCount(result);
 		};
 
 		testButton.addEventListener('click', () => {

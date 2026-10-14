@@ -189,6 +189,8 @@ With the Craft engine, pick a transform under **Craft transform**, or pick **Cus
 
 **Test image** resolves `image_link` for the first item in the feed and fetches the result. It uses the image settings on screen, and the mapping on screen; for a user who can't edit feeds, it uses the saved mapping. You see the URL, a thumbnail, and whether it is a reachable image, before running a build. **Test image** appears on a saved feed whose image engine is not **None (the asset’s own URL)**.
 
+With the **Craft** engine and `image_link` mapped to an Assets field, **Test image** also counts how many of the feed's main images already exist at that transform. A build creates the missing images, so a first build at a new transform takes longer.
+
 ![Test image result with a thumbnail, its size and type, the platform minimum check, and the image URL](../../resources/img/test-image.png)
 
 The test reports the image against the platform's minimum: 500 by 500 for Google, Meta, and TikTok, and 1000 by 1500 for Pinterest. Microsoft documents no minimum. The check compares only width and height. A landscape 2000 by 1500 image passes Pinterest's check but is the wrong shape for Pinterest.

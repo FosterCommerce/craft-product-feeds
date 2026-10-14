@@ -21,6 +21,16 @@ These failures are permanent, and the queue does not retry them:
 
 The queue retries every other failure twice.
 
+## The first build at a new image size is slow
+
+With the **Craft** engine, a build creates each image at the feed's transform the first time it needs one. The first build after you change the transform can take much longer than the builds after it. **Test image** counts how many of the feed's main images already exist at that transform.
+
+To use images that already exist, choose the named transform your product pages use, or **None (the asset’s own URL)**.
+
+## A new build does not start
+
+A queued build that failed, or that a worker stopped partway, holds off new queued builds of the feed until the build timeout passes. After the timeout, the next scheduled `feeds/build` builds the feed. To build sooner, run `./craft product-feeds/feeds/build --feed=<handle> --inline`.
+
 ## The feed built, but items are missing
 
 The **Excluded items** panel on the feed's **Mapping** tab lists the missing items, with a CSV download for the full set. An item is excluded when a required attribute was blank for that item, most often:

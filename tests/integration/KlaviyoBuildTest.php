@@ -4,10 +4,6 @@ declare(strict_types=1);
 
 namespace fostercommerce\productfeeds\tests\integration;
 
-use fostercommerce\productfeeds\enums\Platform;
-use fostercommerce\productfeeds\helpers\Mapping;
-use fostercommerce\productfeeds\models\Feed;
-
 class KlaviyoBuildTest extends IntegrationTestCase
 {
 	public function testAKlaviyoFeedIsAFlatGzippedJsonArray(): void
@@ -78,30 +74,5 @@ class KlaviyoBuildTest extends IntegrationTestCase
 				$this->assertIsNotString($item['$inventory_quantity']);
 			}
 		}
-	}
-
-	/**
-	 * A Klaviyo feed. `inventory_policy` is the one field Klaviyo needs beyond the shared defaults.
-	 */
-	private function klaviyoFeed(string $handle): Feed
-	{
-		return $this->buildableFeed($handle, Platform::Klaviyo, [
-			'inventory_policy' => [
-				'source' => Mapping::USE_DEFAULT,
-				'default' => '1',
-			],
-		]);
-	}
-
-	/**
-	 * @return list<array<string, mixed>>
-	 */
-	private function publishedItems(Feed $feed): array
-	{
-		$items = json_decode($this->publishedArtifact($feed), true, 512, JSON_THROW_ON_ERROR);
-		$this->assertIsList($items);
-
-		/** @var list<array<string, mixed>> $items */
-		return $items;
 	}
 }

@@ -20,7 +20,8 @@ use yii\base\InvalidConfigException;
  * Decides when a feed builds, and makes sure only one build of it runs at a time.
  *
  * A pending flag collapses a burst of edits into one build; a mutex keeps two builds off the same file,
- * and a build that finds it held requeues rather than coordinating with the holder.
+ * and a build that finds it held, or finds a queued build of the feed already running, requeues rather
+ * than coordinating with the holder.
  */
 class BuildQueue extends Component
 {
@@ -125,12 +126,26 @@ class BuildQueue extends Component
 	}
 
 	/**
-	 * Queues a build again after a delay, for the one that found another build already holding the lock.
-	 * The feed stays pending in the meantime, so edits arriving during the wait ride on this build.
+	 * Queues the next run of a build that the queue runs one batch per job.
+	 */
+	public function queueNextBatch(int $feedId, string $buildId): void
+	{
+		Queue::push(new BuildFeed([
+			'feedId' => $feedId,
+			'buildId' => $buildId,
+		]));
+	}
+
+	/**
+	 * Queues a build again after a delay, for the one that found another build already holding the lock
+	 * or already running. Pass the build ID to queue the next run of a build that has started.
+	 *
+	 * A build that has not started keeps the feed pending in the meantime, so it includes edits made during
+	 * the wait.
 	 *
 	 * @return bool false once the feed has stood down too many times, leaving it to its interval
 	 */
-	public function requeueBuild(int $feedId, int $requeues): bool
+	public function requeueBuild(int $feedId, int $requeues, ?string $buildId = null): bool
 	{
 		if ($requeues >= self::MAX_REQUEUES) {
 			// Clear the flag, since no build is queued behind it now, and a set flag would block the interval
@@ -140,11 +155,14 @@ class BuildQueue extends Component
 			return false;
 		}
 
-		Craft::$app->getCache()?->set($this->pendingKey($feedId), true, self::PENDING_TTL);
+		if ($buildId === null) {
+			Craft::$app->getCache()?->set($this->pendingKey($feedId), true, self::PENDING_TTL);
+		}
 
 		Queue::push(new BuildFeed([
 			'feedId' => $feedId,
 			'requeues' => $requeues + 1,
+			'buildId' => $buildId,
 		]), null, self::REQUEUE_DELAY);
 
 		return true;

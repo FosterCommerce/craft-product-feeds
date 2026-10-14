@@ -1,12 +1,20 @@
 # Release Notes for Product Feeds
 
-## Unreleased
-
-### Fixed
-- Fixed a bug where a Klaviyo feed’s **Feed URL** ended in `.gz`, which Klaviyo rejects as an invalid file type. Klaviyo feeds now show the uncompressed `.json` URL.
+## 1.5.0 - 2026-10-14
 
 ### Added
+- Added a count to “Test image” of the feed’s main images that already exist at its Craft transform.
+- Added a warning to the plugin settings when `runQueueAutomatically` is enabled.
 - Added `FeedSpec::compressesUrl()`.
+- Added `ImageTestResult::$generatedImageCount` and `$imageCount`.
+
+### Changed
+- Queued builds now run one batch per queue job, and a feed no longer starts a new queued build while another is running. Building with `--inline` still runs in one process.
+- A failed build now logs its full error, with the stack trace, to the `product-feeds` log category.
+- `BuildQueue::requeueBuild()` now has a `$buildId` argument.
+
+### Fixed
+- Fixed a bug where a Klaviyo feed’s **Feed URL** ended in `.gz`, which Klaviyo rejects as an invalid file type.
 
 ## 1.4.1 - 2026-10-14
 

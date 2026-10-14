@@ -64,5 +64,6 @@ Built feeds are not stored in the database. Each one is written to the plugin's 
 |---|---|
 | `product-feeds/<token>.<extension>.gz` | The gzipped feed. Overwritten on each build rather than timestamped. |
 | `product-feeds/<token>-excluded.csv` | The full list of excluded items. Deleted after a build that excludes zero items. |
+| `product-feeds/builds/<feed ID>/<build ID>/` | A queued build's progress and the items of each batch it has built, kept between queue jobs. Deleted when the build publishes the feed or fails permanently, when the feed is deleted, or by the next queued build once the build timeout has passed. |
 
-Both files are named from the token. Rotating the token copies them to the new token's paths and deletes the old ones once the feed saves with the new token. Switching a feed to or from Klaviyo changes the file extension. Saving deletes the old file, and the feed URL changes and returns 404 until the next build.
+The feed and the excluded items CSV are named from the token. Rotating the token copies them to the new token's paths and deletes the old ones once the feed saves with the new token. Switching a feed to or from Klaviyo changes the file extension. Saving deletes the old file, and the feed URL changes and returns 404 until the next build.
