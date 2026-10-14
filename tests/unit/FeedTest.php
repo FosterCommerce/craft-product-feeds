@@ -36,6 +36,20 @@ class FeedTest extends TestCase
 	}
 
 	/**
+	 * Klaviyo rejects a `.gz` catalog URL, so its feed gives the uncompressed route.
+	 */
+	public function testTheUrlIsGzippedExceptForKlaviyo(): void
+	{
+		$feed = $this->feed(Platform::Google);
+
+		$this->assertStringEndsWith($feed->token . '.xml.gz', $feed->getUrlPath());
+
+		$feed->platform = Platform::Klaviyo->value;
+
+		$this->assertStringEndsWith($feed->token . '.json', $feed->getUrlPath());
+	}
+
+	/**
 	 * `clone` carries the resolved spec over, so a copy given a new platform would keep the old one.
 	 */
 	public function testACloneResolvesItsOwnSpec(): void

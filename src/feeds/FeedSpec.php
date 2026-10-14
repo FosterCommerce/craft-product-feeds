@@ -95,6 +95,14 @@ abstract class FeedSpec
 	abstract public function mimeType(): string;
 
 	/**
+	 * Whether the feed URL to give the platform is the gzipped one.
+	 */
+	public function compressesUrl(): bool
+	{
+		return true;
+	}
+
+	/**
 	 * `$channelTitle` and `$channelLink` are RSS framing; a JSON spec ignores them.
 	 */
 	abstract public function writer(string $filePath, string $channelTitle, string $channelLink): FeedWriter;

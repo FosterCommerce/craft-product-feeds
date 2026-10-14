@@ -232,7 +232,16 @@ class Feed extends Model implements Statusable
 	 */
 	public function getUrlPath(): string
 	{
-		return sprintf('%s/%s-%s', ProductFeeds::FILE_PREFIX, $this->handle, $this->getFileName());
+		$spec = $this->getSpec();
+
+		return sprintf(
+			'%s/%s-%s.%s%s',
+			ProductFeeds::FILE_PREFIX,
+			$this->handle,
+			$this->token,
+			$spec->fileExtension(),
+			$spec->compressesUrl() ? '.gz' : '',
+		);
 	}
 
 	/**

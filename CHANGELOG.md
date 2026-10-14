@@ -1,5 +1,13 @@
 # Release Notes for Product Feeds
 
+## Unreleased
+
+### Fixed
+- Fixed a bug where a Klaviyo feed’s **Feed URL** ended in `.gz`, which Klaviyo rejects as an invalid file type. Klaviyo feeds now show the uncompressed `.json` URL.
+
+### Added
+- Added `FeedSpec::compressesUrl()`.
+
 ## 1.4.1 - 2026-10-14
 
 ### Fixed

@@ -57,6 +57,15 @@ class KlaviyoFeed extends FeedSpec
 		return 'application/json';
 	}
 
+	/**
+	 * Klaviyo rejects a catalog URL ending in `.gz` as an invalid file type.
+	 */
+	#[\Override]
+	public function compressesUrl(): bool
+	{
+		return false;
+	}
+
 	public function writer(string $filePath, string $channelTitle, string $channelLink): FeedWriter
 	{
 		return new JsonFeedWriter($filePath, $this->numericDocumentNames());
