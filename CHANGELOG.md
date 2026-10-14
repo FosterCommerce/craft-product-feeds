@@ -1,5 +1,10 @@
 # Release Notes for Product Feeds
 
+## 1.4.1 - 2026-10-14
+
+### Fixed
+- Fixed a bug where a Klaviyo feed build could fail with “Syntax error” when an earlier part of the request had failed to decode some JSON.
+
 ## 1.4.0 - 2026-10-02
 
 ### Added

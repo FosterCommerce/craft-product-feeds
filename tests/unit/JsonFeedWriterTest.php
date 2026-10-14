@@ -65,6 +65,19 @@ class JsonFeedWriterTest extends WriterTestCase
 		$this->assertStringStartsWith('ok', $description);
 	}
 
+	/**
+	 * Field values decoded earlier in the build can leave a JSON error behind, and it must not fail an
+	 * item that encodes cleanly.
+	 */
+	public function testAnEarlierJsonErrorDoesNotFailTheEncode(): void
+	{
+		json_decode('not json');
+
+		$this->writeFeed();
+
+		$this->assertCount(2, $this->decode());
+	}
+
 	protected function spec(): FeedSpec
 	{
 		return new KlaviyoFeed();

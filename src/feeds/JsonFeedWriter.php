@@ -56,7 +56,8 @@ class JsonFeedWriter extends FeedWriter
 	 */
 	public function writeItem(array $item): void
 	{
-		$json = Json::encode($this->castNumericValues($item), self::ENCODE_FLAGS);
+		// Bypasses Json::encode(), which throws on a stale earlier JSON error under JSON_THROW_ON_ERROR
+		$json = json_encode($this->castNumericValues($item), self::ENCODE_FLAGS);
 
 		$this->write($this->wroteItem ? ',' . $json : $json);
 		$this->wroteItem = true;
